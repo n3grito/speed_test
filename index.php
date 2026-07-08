@@ -134,13 +134,37 @@
       </div>
     </div>
 
+    <!-- Network Monitor -->
+    <div class="card" id="monitor-card">
+      <h2>Monitor de Red <span class="badge" id="monitor-badge">Detenido</span></h2>
+      <p style="color:var(--text2);font-size:.85rem;margin-bottom:14px;">
+        Monitoreo peri&oacute;dico de conectividad. Seleccion&aacute; los protocolos, configur&aacute; el intervalo y el destino.
+      </p>
+      <div class="monitor-grid" id="monitor-grid"></div>
+      <div class="btn-group" style="margin-top:14px;">
+        <button class="btn btn-success" id="btn-monitor-start">Iniciar Monitoreo</button>
+        <button class="btn btn-danger hidden" id="btn-monitor-stop">Detener</button>
+        <button class="btn btn-outline" id="btn-monitor-clear">Limpiar Historial</button>
+      </div>
+      <div id="monitor-status" class="hidden" style="margin-top:14px;">
+        <div class="grid-4" style="margin-bottom:12px;">
+          <div class="stat"><div class="label">Tiempo activo</div><div class="value text2" id="mon-uptime">00:00:00</div></div>
+          <div class="stat"><div class="label">Desconexiones</div><div class="value text2" id="mon-outages">0</div></div>
+          <div class="stat"><div class="label">Estado</div><div class="value success" id="mon-state">Conectado</div></div>
+          <div class="stat"><div class="label">&Uacute;ltimo evento</div><div class="value text2" id="mon-last">—</div></div>
+        </div>
+        <div id="monitor-log" style="max-height:200px;overflow-y:auto;"></div>
+      </div>
+    </div>
+
     <footer>
-      <p>NetSpeed Analyzer v2.0 &mdash; Multi-stream HTTP | ICMP | Bufferbloat</p>
+      <p>NetSpeed Analyzer v2.0 &mdash; Multi-stream HTTP | ICMP | Bufferbloat | Monitor</p>
     </footer>
   </div>
 
   <script src="assets/js/chart.js"></script>
   <script src="assets/js/gauge.js"></script>
+  <script src="assets/js/monitor.js"></script>
   <script src="assets/js/script.js"></script>
   <script src="assets/js/speedtest.js"></script>
 </body>

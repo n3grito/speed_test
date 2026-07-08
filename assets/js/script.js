@@ -201,8 +201,156 @@ async function runQuickTest() {
     await Promise.allSettled([runDownload(), runUpload()]);
 }
 
+function initMonitor() {
+    const grid = document.getElementById('monitor-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    MONITOR.protocols.forEach(p => {
+        const cfg = MONITOR.config.find(c => c.id === p.id);
+        const card = document.createElement('div');
+        card.className = 'protocol-card' + (cfg.enabled ? ' active' : '');
+        card.id = 'pcard-' + p.id;
+        card.innerHTML = `
+          <h4>${p.label}</h4>
+          <p>${p.desc}</p>
+          <div class="pcfg">
+            <label><input type="checkbox" class="pcheck" data-id="${p.id}" ${cfg.enabled ? 'checked' : ''}> Activo</label>
+            <input type="number" class="pinterval" data-id="${p.id}" value="${cfg.interval}" min="2" max="300"> s
+            <input type="text" class="ptarget" data-id="${p.id}" value="${cfg.target}" placeholder="Destino">
+          </div>
+          <div class="pstat" id="pstat-${p.id}">${cfg.enabled ? 'Listo' : 'Inactivo'}</div>`;
+        grid.appendChild(card);
+    });
+
+    grid.addEventListener('change', e => {
+        const el = e.target;
+        const id = el.dataset.id;
+        if (!id) return;
+        if (el.classList.contains('pcheck')) {
+            MONITOR.saveConfig(id, 'enabled', el.checked);
+            document.getElementById('pcard-' + id).className = 'protocol-card' + (el.checked ? ' active' : '');
+            document.getElementById('pstat-' + id).textContent = el.checked ? 'Listo' : 'Inactivo';
+        }
+    });
+    grid.addEventListener('input', e => {
+        const el = e.target;
+        const id = el.dataset.id;
+        if (!id) return;
+        if (el.classList.contains('pinterval')) MONITOR.saveConfig(id, 'interval', parseInt(el.value) || 5);
+        if (el.classList.contains('ptarget')) MONITOR.saveConfig(id, 'target', el.value);
+    });
+
+    const startBtn = document.getElementById('btn-monitor-start');
+    const stopBtn = document.getElementById('btn-monitor-stop');
+    const clearBtn = document.getElementById('btn-monitor-clear');
+    const badge = document.getElementById('monitor-badge');
+
+    function updateMonitorUI() {
+        const running = MONITOR.running;
+        startBtn.classList.toggle('hidden', running);
+        stopBtn.classList.toggle('hidden', !running);
+        badge.textContent = running ? 'Monitoreando' : 'Detenido';
+        badge.className = 'badge' + (running ? ' success' : '');
+        document.getElementById('monitor-status').classList.toggle('hidden', !running && !MONITOR.history.length);
+    }
+
+    function formatUptime(sec) {
+        const h = String(Math.floor(sec / 3600)).padStart(2, '0');
+        const m = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
+        const s = String(sec % 60).padStart(2, '0');
+        return h + ':' + m + ':' + s;
+    }
+
+    function updateMonitorStats() {
+        const uptime = MONITOR.uptimeSeconds;
+        setText('mon-uptime', formatUptime(uptime));
+        setText('mon-outages', String(MONITOR.outageCount));
+
+        const pingStats = MONITOR.stats['ping'];
+        if (pingStats && pingStats.checks > 0) {
+            const isUp = pingStats.lastSuccess > (pingStats.lastFailure || 0);
+            setText('mon-state', isUp ? 'Conectado' : 'Desconectado', isUp ? 'success' : 'danger');
+        }
+    }
+
+    let uptimeInterval;
+    MONITOR.onEvent((event, data) => {
+        if (event === 'start' || event === 'stop') {
+            updateMonitorUI();
+            if (event === 'start') {
+                uptimeInterval = setInterval(updateMonitorStats, 1000);
+                updateMonitorStats();
+            } else {
+                clearInterval(uptimeInterval);
+            }
+            if (event === 'stop') updateMonitorStats();
+        }
+        if (event === 'result') {
+            const { protocol, entry, stats } = data;
+            const st = document.getElementById('pstat-' + protocol);
+            if (st) {
+                const pct = stats.uptime.toFixed(1);
+                st.textContent = entry.success
+                    ? `OK ${entry.rtt}ms — ${pct}% uptime`
+                    : `Falló — ${pct}% uptime` + (entry.error ? ' (' + entry.error + ')' : '');
+            }
+            updateMonitorStats();
+
+            const log = document.getElementById('monitor-log');
+            if (log) {
+                const d = new Date(entry.ts);
+                const time = d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0') + ':' + d.getSeconds().toString().padStart(2,'0');
+                const row = document.createElement('div');
+                row.className = 'mon-log-entry';
+                row.innerHTML = `<span class="ml-time">${time}</span>
+                  <span class="ml-protocol">${protocol}</span>
+                  <span class="ml-status">${entry.success ? '✓' : '✗'}</span>
+                  <span class="ml-rtt">${entry.rtt != null ? entry.rtt + 'ms' : '—'}</span>`;
+                log.insertBefore(row, log.firstChild);
+                while (log.children.length > 100) log.removeChild(log.lastChild);
+            }
+
+            const lastEl = document.getElementById('mon-last');
+            if (lastEl && entry.ts) {
+                const secsAgo = Math.floor((Date.now() - entry.ts) / 1000);
+                lastEl.textContent = secsAgo + 's';
+            }
+        }
+        if (event === 'disconnect') {
+            setText('mon-state', 'Desconectado', 'danger');
+        }
+        if (event === 'reconnect') {
+            setText('mon-state', 'Conectado', 'success');
+        }
+        if (event === 'clear') {
+            document.getElementById('monitor-log').innerHTML = '';
+            setText('mon-uptime', '00:00:00');
+            setText('mon-outages', '0');
+            setText('mon-state', 'Conectado', 'success');
+            setText('mon-last', '—');
+            updateMonitorUI();
+            MONITOR.protocols.forEach(p => {
+                const st = document.getElementById('pstat-' + p.id);
+                if (st) st.textContent = 'Inactivo';
+            });
+        }
+    });
+
+    startBtn.addEventListener('click', () => {
+        MONITOR.start();
+        updateMonitorUI();
+    });
+    stopBtn.addEventListener('click', () => {
+        MONITOR.stop();
+        updateMonitorUI();
+    });
+    clearBtn.addEventListener('click', () => MONITOR.clearHistory());
+    updateMonitorUI();
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     loadNetworkInfo();
+    initMonitor();
 
     $('#btn-download').addEventListener('click', runDownload);
     $('#btn-upload').addEventListener('click', runUpload);

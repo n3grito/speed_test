@@ -156,3 +156,29 @@ input[type="text"], input[type="number"] {
   font-size: .9rem;
 }
 input:focus { outline: none; border-color: var(--primary); }
+
+.monitor-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+.protocol-card {
+  background: var(--surface2); border-radius: var(--radius-sm);
+  padding: 12px; border: 1px solid transparent;
+  transition: border-color .2s;
+}
+.protocol-card.active { border-color: var(--primary); }
+.protocol-card h4 { font-size:.85rem; margin:0 0 4px; color:var(--text); }
+.protocol-card p { font-size:.75rem; margin:0 0 10px; color:var(--text3); }
+.protocol-card .pcfg { display:flex; gap:6px; align-items:center; flex-wrap:wrap; font-size:.75rem; color:var(--text2); }
+.protocol-card .pcfg input[type="number"] { width:60px; }
+.protocol-card .pcfg input[type="text"] { flex:1; min-width:80px; }
+.protocol-card .pstat { font-size:.75rem; margin-top:8px; color:var(--text2); }
+
+.mon-log-entry {
+  display:flex; gap:8px; align-items:center;
+  padding:3px 0; font-size:.75rem; border-bottom:1px solid rgba(255,255,255,0.04);
+}
+.mon-log-entry .ml-time { color:var(--text3); width:70px; flex-shrink:0; }
+.mon-log-entry .ml-protocol { width:50px; flex-shrink:0; font-weight:600; }
+.mon-log-entry .ml-status { width:20px; flex-shrink:0; text-align:center; }
+.mon-log-entry .ml-rtt { width:60px; flex-shrink:0; text-align:right; }

@@ -77,15 +77,25 @@ function checkRateLimit($ip) {
 
 function fetchFromCache($key) {
     $file = CACHE_DIR . DIRECTORY_SEPARATOR . md5($key) . '.cache';
-    if (is_file($file) && (time() - filemtime($file)) < CACHE_TTL) {
-        return json_decode(file_get_contents($file), true);
+    if (!is_file($file)) return null;
+    $raw = json_decode(file_get_contents($file), true);
+    if (!$raw) return null;
+    // New format with metadata
+    if (isset($raw['_expires']) && isset($raw['data'])) {
+        if (time() < $raw['_expires']) return $raw['data'];
+        @unlink($file);
+        return null;
     }
+    // Legacy format (no metadata)
+    if ((time() - filemtime($file)) < CACHE_TTL) return $raw;
     return null;
 }
 
-function saveToCache($key, $data) {
+function saveToCache($key, $data, $ttl = null) {
+    if ($ttl === null) $ttl = CACHE_TTL;
+    $meta = ['_expires' => time() + $ttl, 'data' => $data];
     $file = CACHE_DIR . DIRECTORY_SEPARATOR . md5($key) . '.cache';
-    @file_put_contents($file, json_encode($data), LOCK_EX);
+    @file_put_contents($file, json_encode($meta), LOCK_EX);
 }
 
 function getGateway() {
