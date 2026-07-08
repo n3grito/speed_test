@@ -5,16 +5,54 @@ class LiveChart {
         this.ctx = this.canvas.getContext('2d');
         this.dpr = window.devicePixelRatio || 1;
 
-        this.data = [];
         this.maxPoints = options.maxPoints || 80;
         this.maxValue = options.maxValue || 100;
         this.label = options.label || 'Mbps';
-        this.color = options.color || '#3b82f6';
-        this.bgColor = options.bgColor || 'rgba(59,130,246,0.1)';
         this.fill = options.fill !== false;
+
+        const seriesConfig = options.series || null;
+        if (seriesConfig) {
+            this.series = seriesConfig.map(s => ({
+                label: s.label || 'Serie',
+                color: s.color || '#3b82f6',
+                bgColor: s.bgColor || 'rgba(59,130,246,0.1)',
+                data: [],
+            }));
+        } else {
+            this.series = [{
+                label: this.label,
+                color: options.color || '#3b82f6',
+                bgColor: options.bgColor || 'rgba(59,130,246,0.1)',
+                data: [],
+            }];
+        }
 
         this._resize();
         this._bindResize();
+        this.draw();
+    }
+
+    addPoint(seriesIdx, value, timestamp) {
+        if (value == null || isNaN(value)) return;
+        if (typeof seriesIdx !== 'number') {
+            timestamp = value;
+            value = seriesIdx;
+            seriesIdx = 0;
+        }
+        const series = this.series[seriesIdx];
+        if (!series) return;
+        series.data.push({ value, ts: timestamp || performance.now() });
+        if (series.data.length > this.maxPoints) {
+            series.data = series.data.slice(-this.maxPoints);
+        }
+        this.draw();
+    }
+
+    clear() {
+        for (const s of this.series) {
+            s.data = [];
+        }
+        this.maxValue = 100;
         this.draw();
     }
 
@@ -38,35 +76,41 @@ class LiveChart {
         });
     }
 
-    addPoint(value, timestamp) {
-        if (value == null || isNaN(value)) return;
-        this.data.push({ value, ts: timestamp || performance.now() });
-        if (this.data.length > this.maxPoints) {
-            this.data = this.data.slice(-this.maxPoints);
+    _getAllValues() {
+        const all = [];
+        for (const s of this.series) {
+            for (const d of s.data) {
+                if (d.value != null && !isNaN(d.value)) all.push(d.value);
+            }
         }
-        if (value > this.maxValue * 0.8) {
-            this.maxValue = value * 1.25;
-        }
-        this.draw();
+        return all;
     }
 
-    clear() {
-        this.data = [];
-        this.maxValue = 100;
-        this.draw();
+    _recalcMax() {
+        const values = this._getAllValues();
+        if (values.length === 0) return;
+        const peak = Math.max(...values);
+        if (peak > this.maxValue * 0.75) {
+            this.maxValue = peak * 1.3;
+        } else if (peak < this.maxValue * 0.25 && this.maxValue > 5) {
+            this.maxValue = Math.max(peak * 1.5, 2);
+        }
     }
 
     draw() {
         const ctx = this.ctx;
         const w = this.width;
         const h = this.height;
-        const pad = { t: 16, r: 16, b: 28, l: 48 };
+        const pad = { t: 24, r: 16, b: 28, l: 48 };
         const plotW = w - pad.l - pad.r;
         const plotH = h - pad.t - pad.b;
 
         ctx.clearRect(0, 0, w, h);
 
-        if (this.data.length === 0) {
+        const allValues = this._getAllValues();
+        const hasData = allValues.length > 0;
+
+        if (!hasData) {
             ctx.fillStyle = '#475569';
             ctx.font = '12px system-ui, sans-serif';
             ctx.textAlign = 'center';
@@ -74,36 +118,50 @@ class LiveChart {
             return;
         }
 
-        const values = this.data.map(d => d.value);
-        const currentMax = Math.max(...values, 1);
+        this._recalcMax();
+        const currentMax = Math.max(...allValues, 1);
         const yMax = Math.max(this.maxValue, currentMax * 1.1);
 
         const scaleY = (v) => pad.t + plotH - (v / yMax) * plotH;
-        const scaleX = (i) => pad.l + (i / Math.max(this.data.length - 1, 1)) * plotW;
+        const scaleX = (i, len) => pad.l + (i / Math.max(len - 1, 1)) * plotW;
 
-        ctx.beginPath();
-        ctx.strokeStyle = this.color;
-        ctx.lineWidth = 2;
-        ctx.lineJoin = 'round';
-        ctx.lineCap = 'round';
+        for (let si = 0; si < this.series.length; si++) {
+            const s = this.series[si];
+            const vals = s.data.map(d => d.value);
+            if (vals.length === 0) continue;
 
-        for (let i = 0; i < this.data.length; i++) {
-            const x = scaleX(i);
-            const y = scaleY(values[i]);
-            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-        }
-        ctx.stroke();
+            ctx.beginPath();
+            ctx.strokeStyle = s.color;
+            ctx.lineWidth = si === 1 ? 2.5 : 2;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
 
-        if (this.fill) {
-            const lastX = scaleX(this.data.length - 1);
-            ctx.lineTo(lastX, pad.t + plotH);
-            ctx.lineTo(scaleX(0), pad.t + plotH);
-            ctx.closePath();
-            const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + plotH);
-            grad.addColorStop(0, this.bgColor);
-            grad.addColorStop(1, 'transparent');
-            ctx.fillStyle = grad;
-            ctx.fill();
+            for (let i = 0; i < vals.length; i++) {
+                const x = scaleX(i, vals.length);
+                const y = scaleY(vals[i]);
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            if (this.fill && si === 0) {
+                const lastX = scaleX(vals.length - 1, vals.length);
+                ctx.lineTo(lastX, pad.t + plotH);
+                ctx.lineTo(scaleX(0, 1), pad.t + plotH);
+                ctx.closePath();
+                const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + plotH);
+                grad.addColorStop(0, s.bgColor);
+                grad.addColorStop(1, 'transparent');
+                ctx.fillStyle = grad;
+                ctx.fill();
+            }
+
+            ctx.fillStyle = s.color;
+            ctx.font = 'bold 11px system-ui, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            const last = vals[vals.length - 1];
+            const labelY = pad.t + (si * 16);
+            ctx.fillText(s.label + ': ' + last.toFixed(2) + ' Mbps', pad.l, labelY);
         }
 
         ctx.fillStyle = '#64748b';
@@ -123,31 +181,25 @@ class LiveChart {
             ctx.stroke();
         }
 
-        ctx.fillStyle = '#64748b';
-        ctx.font = '10px system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-
-        const labelCount = Math.min(6, this.data.length);
-        const step = Math.max(1, Math.floor(this.data.length / labelCount));
-        for (let i = 0; i < this.data.length; i += step) {
-            const label = (this.data[i].ts / 1000).toFixed(1) + 's';
-            ctx.fillText(label, scaleX(i), pad.t + plotH + 6);
+        const allTs = [];
+        for (const s of this.series) {
+            for (const d of s.data) {
+                if (d.ts != null) allTs.push(d.ts);
+            }
         }
-
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '11px system-ui, sans-serif';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        ctx.fillText(this.label, pad.l, 2);
-
-        if (values.length > 0) {
-            const lastVal = values[values.length - 1];
-            ctx.fillStyle = this.color;
-            ctx.font = 'bold 13px system-ui, sans-serif';
-            ctx.textAlign = 'right';
+        if (allTs.length > 0) {
+            ctx.fillStyle = '#64748b';
+            ctx.font = '10px system-ui, sans-serif';
+            ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
-            ctx.fillText(lastVal.toFixed(2) + ' ' + this.label, w - pad.r, 2);
+            const labelCount = Math.min(6, Math.max(...this.series.map(s => s.data.length)));
+            for (let si = 0; si < this.series.length; si++) {
+                const step = Math.max(1, Math.floor(this.series[si].data.length / labelCount));
+                for (let i = 0; i < this.series[si].data.length; i += step) {
+                    const label = (this.series[si].data[i].ts / 1000).toFixed(1) + 's';
+                    ctx.fillText(label, scaleX(i, this.series[si].data.length), pad.t + plotH + 6);
+                }
+            }
         }
     }
 }

@@ -3,10 +3,13 @@ const SPEEDTEST = {
     gauge: null,
     chart: null,
     results: { ping: null, download: null, upload: null },
+    _ac: null,
+    _sampleTimer: null,
 
     async start() {
         if (this.state !== 'idle') return;
         this.state = 'running';
+        this._ac = new AbortController();
         this.results = { ping: null, download: null, upload: null };
 
         show('speedtest-progress');
@@ -19,28 +22,38 @@ const SPEEDTEST = {
         }
         if (!this.chart) {
             this.chart = new LiveChart('speed-chart', {
-                maxPoints: 160, maxValue: 100, label: 'Mbps',
-                color: '#3b82f6', bgColor: 'rgba(59,130,246,0.12)',
+                maxPoints: 160, maxValue: 100,
+                series: [
+                    { label: 'Descarga ↓', color: '#3b82f6', bgColor: 'rgba(59,130,246,0.12)' },
+                    { label: 'Subida ↑', color: '#22c55e', bgColor: 'rgba(34,197,94,0.12)' },
+                ],
             });
         }
         this.gauge.setPhase('ping');
         this.chart.clear();
-        this.chart.maxValue = 100;
         this._setProgress(5, 'Midiendo latencia...');
 
         try {
+            if (this._ac.signal.aborted) throw new DOMException('Abortado', 'AbortError');
             await this._runPingPhase();
+
+            if (this._ac.signal.aborted) throw new DOMException('Abortado', 'AbortError');
             this._setProgress(25, 'Descargando...');
             await this._runDownloadPhase();
+
+            if (this._ac.signal.aborted) throw new DOMException('Abortado', 'AbortError');
             this._setProgress(60, 'Subiendo...');
             await this._runUploadPhase();
+
             this._setProgress(95, 'Generando reporte...');
             this._showSummary();
             this._setProgress(100, 'Completado');
         } catch (e) {
-            showError('speedtest-error', 'Error: ' + e.message);
+            if (e.name !== 'AbortError')
+                showError('speedtest-error', 'Error: ' + e.message);
         } finally {
             this.state = 'idle';
+            this._ac = null;
         }
     },
 
@@ -48,7 +61,8 @@ const SPEEDTEST = {
         const target = $('#ping-target').value || '8.8.8.8';
         const count = parseInt($('#ping-count').value) || 10;
         const d = await apiFetch(
-            `${API_BASE}/icmp.php?target=${encodeURIComponent(target)}&count=${count}`
+            `${API_BASE}/icmp.php?target=${encodeURIComponent(target)}&count=${count}`,
+            { signal: this._ac.signal }
         );
 
         this.results.ping = d;
@@ -61,6 +75,7 @@ const SPEEDTEST = {
 
         if (d.rtts && d.rtts.length) {
             for (const v of d.rtts) {
+                if (this._ac.signal.aborted) return;
                 this.gauge.setValue(v);
                 await this._sleep(30);
             }
@@ -82,6 +97,7 @@ const SPEEDTEST = {
 
         const totalSize = 5 * 1024 * 1024;
         const streams = 4;
+        const signal = this._ac.signal;
         const self = this;
 
         let completed = 0;
@@ -90,13 +106,13 @@ const SPEEDTEST = {
         let lastSampleTime = start;
         let lastSampleBytes = 0;
 
-        const sampleTimer = setInterval(() => {
+        this._sampleTimer = setInterval(() => {
             const now = performance.now();
             const total = streamBytes.reduce((a, b) => a + b, 0);
             const dt = (now - lastSampleTime) / 1000;
             if (dt >= 0.15) {
                 const instMbps = ((total - lastSampleBytes) * 8) / (dt * 1000000);
-                self.chart.addPoint(Math.max(instMbps, 0), (now - start) / 1000);
+                self.chart.addPoint(0, Math.max(instMbps, 0), (now - start) / 1000);
                 self.gauge.setValue(Math.max(instMbps, 0));
                 lastSampleBytes = total;
                 lastSampleTime = now;
@@ -106,12 +122,17 @@ const SPEEDTEST = {
         const promises = Array.from({ length: streams }, async (_, i) => {
             try {
                 const resp = await fetch(
-                    `${API_BASE}/download.php?size=${totalSize}&id=${i}&_=${Date.now()}`
+                    `${API_BASE}/download.php?size=${totalSize}&id=${i}&_=${Date.now()}`,
+                    { signal }
                 );
                 const reader = resp.body.getReader();
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
+                    if (signal.aborted) {
+                        reader.cancel().catch(() => {});
+                        throw new DOMException('Abortado', 'AbortError');
+                    }
                     streamBytes[i] += value.length;
                 }
             } finally {
@@ -119,8 +140,12 @@ const SPEEDTEST = {
             }
         });
 
-        await Promise.allSettled(promises);
-        clearInterval(sampleTimer);
+        try {
+            await Promise.allSettled(promises);
+        } finally {
+            clearInterval(this._sampleTimer);
+            this._sampleTimer = null;
+        }
 
         if (completed < streams) {
             const rate = completed / streams;
@@ -147,7 +172,9 @@ const SPEEDTEST = {
         const totalSize = 3 * 1024 * 1024;
         const start = performance.now();
         const self = this;
-        let lastLoaded = 0, lastTime = start;
+        const signal = this._ac.signal;
+        let cancelled = false;
+        let prevLoaded = 0, prevTime = start;
 
         const payload = new Uint8Array(totalSize);
         for (let i = 0; i < totalSize; i += 65536) {
@@ -159,23 +186,27 @@ const SPEEDTEST = {
 
         return new Promise((resolve) => {
             const xhr = new XMLHttpRequest();
-            xhr.open('POST', `${API_BASE}/upload.php`);
-            xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+
+            signal.addEventListener('abort', () => {
+                cancelled = true;
+                xhr.abort();
+            }, { once: true });
 
             xhr.upload.onprogress = (e) => {
-                if (!e.lengthComputable) return;
+                if (!e.lengthComputable || cancelled) return;
                 const now = performance.now();
-                const dt = (now - lastTime) / 1000;
+                const dt = (now - prevTime) / 1000;
                 if (dt >= 0.2) {
-                    const instMbps = ((e.loaded - lastLoaded) * 8) / (dt * 1000000);
-                    self.chart.addPoint(Math.max(instMbps, 0), (now - start) / 1000);
+                    const instMbps = ((e.loaded - prevLoaded) * 8) / (dt * 1000000);
+                    self.chart.addPoint(1, Math.max(instMbps, 0), (now - start) / 1000);
                     self.gauge.setValue(Math.max(instMbps, 0));
-                    lastLoaded = e.loaded;
-                    lastTime = now;
+                    prevLoaded = e.loaded;
+                    prevTime = now;
                 }
             };
 
             xhr.onload = () => {
+                if (cancelled) { resolve(); return; }
                 const elapsed = (performance.now() - start) / 1000;
                 const mbps = totalSize > 0 ? (totalSize * 8) / (elapsed * 1000000) : 0;
                 self.constructor._lastDlSpeed = mbps;
@@ -187,7 +218,15 @@ const SPEEDTEST = {
                 setText('result-ul-tiempo', elapsed.toFixed(2) + ' s');
                 resolve();
             };
-            xhr.onerror = () => resolve();
+            xhr.onerror = () => {
+                if (cancelled) { resolve(); return; }
+                showError('speedtest-error', 'Error en prueba de subida');
+                resolve();
+            };
+            xhr.onabort = () => { resolve(); };
+
+            xhr.open('POST', `${API_BASE}/upload.php`);
+            xhr.setRequestHeader('Content-Type', 'application/octet-stream');
             xhr.send(payload);
         });
     },
@@ -203,7 +242,6 @@ const SPEEDTEST = {
         let bloatClass = 'text2';
         if (p && p.rtt_promedio) {
             const baseline = p.rtt_promedio;
-            const ratio = 1;
             if (baseline < 5) {
                 bloat = 'A (Latencia excelente)';
                 bloatClass = 'success';
@@ -222,11 +260,6 @@ const SPEEDTEST = {
             }
         }
         setText('bufferbloat', bloat, bloatClass);
-
-        if (d && d.mbps && u && u.mbps) {
-            const ratio = d.mbps / Math.max(u.mbps, 0.1);
-            setText('dl-ul-ratio', ratio.toFixed(1) + ':1');
-        }
 
         if (d && d.mbps) {
             setText('result-dl-data', d.mbps.toFixed(2) + ' Mbps @ ' + d.tiempo.toFixed(1) + 's');

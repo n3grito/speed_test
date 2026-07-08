@@ -16,13 +16,11 @@
     <!-- Network Info -->
     <div class="card">
       <h2>Informaci&oacute;n de Red</h2>
-      <div class="grid-3">
-        <div class="stat"><div class="label">IP P&uacute;blica</div><div class="value pending" id="ip-publica">Cargando...</div></div>
+      <div class="grid-2">
+        <div class="stat"><div class="label">IP Router</div><div class="value pending" id="ip-router">Cargando...</div></div>
         <div class="stat"><div class="label">IP Local</div><div class="value pending" id="ip-local">Cargando...</div></div>
         <div class="stat"><div class="label">Proveedor (ISP)</div><div class="value pending" id="proveedor">Cargando...</div></div>
-        <div class="stat"><div class="label">ASN</div><div class="value pending" id="asn">Cargando...</div></div>
         <div class="stat"><div class="label">Ubicaci&oacute;n</div><div class="value pending" id="ubicacion">Cargando...</div></div>
-        <div class="stat"><div class="label">Hostname</div><div class="value pending" id="hostname">Cargando...</div></div>
       </div>
       <div id="network-error" class="error-msg hidden"></div>
     </div>

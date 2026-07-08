@@ -58,13 +58,10 @@ async function loadNetworkInfo() {
     try {
         const d = await apiFetch(`${API_BASE}/network-info.php`);
         STATE.networkInfo = d;
-        setText('ip-publica', d.ip_publica, 'primary');
+        setText('ip-router', d.ip_router || 'N/A', 'primary');
         setText('ip-local', d.ip_local, 'text2');
-        setText('proveedor', d.proveedor, 'success');
-        setText('asn', d.asn, 'text2');
-        setText('ubicacion', d.ubicacion, 'text2');
-        setText('hostname', d.hostname || 'N/A', 'text2');
-        setText('pais', d.pais || 'N/A', 'text2');
+        setText('proveedor', d.proveedor || 'N/A', 'success');
+        setText('ubicacion', d.ubicacion || 'N/A', 'text2');
     } catch (e) {
         showError('network-error', 'Error de red: ' + e.message);
     }
@@ -193,11 +190,13 @@ async function runDownload() {
     } finally {
         hide('loading-download');
         STATE.testing.dl = false;
+        const idx = STATE.controllers.indexOf(ac);
+        if (idx >= 0) STATE.controllers.splice(idx, 1);
     }
 }
 
 function runUpload() {
-    if (STATE.testing.ul) return Promise.resolve();
+    if (STATE.testing.ul) return;
     STATE.testing.ul = true;
     hide('ul-error');
     setProgress('ul-progress', 0);
@@ -243,16 +242,22 @@ function runUpload() {
             }
         };
 
+        function _ulDone() {
+            STATE.testing.ul = false;
+            hide('loading-upload');
+            const idx = STATE.controllers.indexOf(ac);
+            if (idx >= 0) STATE.controllers.splice(idx, 1);
+        }
+
         xhr.onload = () => {
             const elapsed = (performance.now() - start) / 1000;
             const mbps = (totalSize * 8) / (elapsed * 1000000);
-            STATE.testing.ul = false;
-            hide('loading-upload');
+            _ulDone();
             renderBandwidthResult('ul', totalSize, elapsed, mbps);
             resolve();
         };
-        xhr.onerror = () => { STATE.testing.ul = false; hide('loading-upload'); showError('ul-error', 'Error subida'); resolve(); };
-        xhr.onabort = () => { STATE.testing.ul = false; hide('loading-upload'); resolve(); };
+        xhr.onerror = () => { _ulDone(); showError('ul-error', 'Error subida'); resolve(); };
+        xhr.onabort = () => { _ulDone(); resolve(); };
         ac.signal.addEventListener('abort', () => xhr.abort());
 
         xhr.open('POST', `${API_BASE}/upload.php`);
@@ -273,11 +278,17 @@ function renderBandwidthResult(prefix, bytes, elapsed, mbps) {
 function cancelTests() {
     STATE.controllers.forEach(ac => ac.abort());
     STATE.controllers = [];
-    if (SPEEDTEST.state === 'running') SPEEDTEST.state = 'idle';
+    STATE.testing = { ping: false, dl: false, ul: false };
+    $$('.loading').forEach(e => e.classList.add('hidden'));
+    if (SPEEDTEST._ac && !SPEEDTEST._ac.signal.aborted) {
+        SPEEDTEST._ac.abort();
+    }
+    hide('speedtest-progress');
+    hide('speedtest-summary');
 }
 
 async function runQuickTest() {
-    if (STATE.testing.ping || STATE.testing.dl || STATE.testing.ul) return;
+    STATE.testing = { ping: false, dl: false, ul: false };
     hide('resultado-ping');
     hide('resultado-download');
     hide('resultado-upload');

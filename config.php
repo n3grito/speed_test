@@ -88,6 +88,28 @@ function saveToCache($key, $data) {
     @file_put_contents($file, json_encode($data), LOCK_EX);
 }
 
+function getGateway() {
+    if (IS_WIN) {
+        $out = shell_exec('ipconfig 2>nul');
+        if ($out && preg_match('/Puerta de enlace.*?:\s*(\d+\.\d+\.\d+\.\d+)/i', $out, $m)) {
+            return $m[1];
+        }
+        if ($out && preg_match('/Default Gateway.*?:\s*(\d+\.\d+\.\d+\.\d+)/i', $out, $m)) {
+            return $m[1];
+        }
+    } else {
+        $out = shell_exec('ip route 2>/dev/null');
+        if ($out && preg_match('/^default via\s+(\S+)/m', $out, $m)) {
+            return $m[1];
+        }
+        $out = shell_exec('route -n 2>/dev/null');
+        if ($out && preg_match('/^0\.0\.0\.0\s+(\d+\.\d+\.\d+\.\d+)/m', $out, $m)) {
+            return $m[1];
+        }
+    }
+    return null;
+}
+
 function httpGet($url, $timeout = 5) {
     if (!function_exists('curl_init')) {
         $ctx = stream_context_create(['http' => ['timeout' => $timeout, 'user_agent' => APP_NAME . '/' . APP_VERSION]]);

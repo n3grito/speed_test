@@ -64,6 +64,8 @@ canvas.chart {
   background: var(--surface2); border-radius: var(--radius-sm);
   margin-top: 12px;
 }
+#speed-chart { height: 200px; }
+#dl-chart, #ul-chart { height: 120px; }
 
 .gauge-container {
   display: flex; justify-content: center; align-items: center;
