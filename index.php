@@ -28,16 +28,30 @@
     <!-- Speed Test Hero -->
     <div class="card">
       <div class="speedtest-hero">
-        <div class="gauge-container">
-          <canvas id="gauge-canvas"></canvas>
+        <div class="gauge-row">
+          <div class="gauge-box">
+            <div class="gauge-container">
+              <canvas id="gauge-dl" width="240" height="200"></canvas>
+            </div>
+            <div id="progress-dl" style="margin-top:8px;">
+              <div class="progress-bar lg"><div class="fill" id="progress-dl-fill" style="width:0%"></div></div>
+              <p id="progress-dl-label" style="color:var(--text3);font-size:.75rem;margin-top:4px;">Descarga</p>
+            </div>
+          </div>
+          <div class="gauge-box">
+            <div class="gauge-container">
+              <canvas id="gauge-ul" width="240" height="200"></canvas>
+            </div>
+            <div id="progress-ul" style="margin-top:8px;">
+              <div class="progress-bar lg"><div class="fill" id="progress-ul-fill" style="width:0%"></div></div>
+              <p id="progress-ul-label" style="color:var(--text3);font-size:.75rem;margin-top:4px;">Subida</p>
+            </div>
+          </div>
         </div>
-        <div style="margin-top: 4px;">
+        <div style="margin-top: 10px;">
           <button class="btn btn-success btn-lg" id="btn-speedtest">Iniciar Test Completo</button>
         </div>
-        <div id="speedtest-progress" class="hidden" style="margin-top:16px;max-width:400px;margin-left:auto;margin-right:auto;">
-          <div class="progress-bar lg"><div class="fill" id="speedtest-progress-fill"></div></div>
-          <p id="speedtest-progress-label" style="color:var(--text3);font-size:.8rem;margin-top:6px;"></p>
-        </div>
+        <p id="speedtest-status" style="color:var(--text3);font-size:.8rem;margin-top:8px;min-height:1.2em;"></p>
         <div id="speedtest-error" class="error-msg hidden" style="margin-top:12px;"></div>
       </div>
 
@@ -63,48 +77,6 @@
         <div class="btn-group" style="margin-top:12px;">
           <button class="btn btn-outline" onclick="SPEEDTEST.start()">Repetir Test</button>
         </div>
-      </div>
-    </div>
-
-    <!-- ICMP Ping Profesional -->
-    <div class="card">
-      <h2>Prueba ICMP Profesional <span class="badge">Jitter &amp; Packet Loss</span></h2>
-      <div class="grid-2" style="margin-bottom:14px;">
-        <div>
-          <label style="font-size:.85rem;color:var(--text2);">Destino</label>
-          <input type="text" id="ping-target" value="8.8.8.8">
-        </div>
-        <div>
-          <label style="font-size:.85rem;color:var(--text2);">Paquetes</label>
-          <input type="number" id="ping-count" value="10" min="1" max="50">
-        </div>
-      </div>
-      <div class="btn-group">
-        <button class="btn btn-primary" id="btn-ping">Ejecutar Ping</button>
-      </div>
-
-      <div id="loading-ping" class="loading hidden">
-        <div class="spinner"></div>
-        <p style="color:var(--text2);font-size:.9rem;">Ejecutando ping ICMP...</p>
-      </div>
-
-      <div id="resultado-ping" class="hidden">
-        <div class="grid-4">
-          <div class="stat"><div class="label">P&eacute;rdida</div><div class="value pending" id="ping-perdida">—</div></div>
-          <div class="stat"><div class="label">M&iacute;nimo</div><div class="value pending" id="ping-min">—</div></div>
-          <div class="stat"><div class="label">Promedio</div><div class="value pending" id="ping-prom">—</div></div>
-          <div class="stat"><div class="label">Mediana</div><div class="value pending" id="ping-mediana">—</div></div>
-          <div class="stat"><div class="label">M&aacute;ximo</div><div class="value pending" id="ping-max">—</div></div>
-          <div class="stat"><div class="label">Jitter (IQR)</div><div class="value pending" id="ping-jitter">—</div></div>
-          <div class="stat"><div class="label">Desviaci&oacute;n</div><div class="value pending" id="ping-desviacion">—</div></div>
-          <div class="stat"><div class="label">Resol. DNS</div><div class="value pending" id="ping-resolucion">—</div></div>
-        </div>
-        <div class="grid-2" style="margin-top:12px;">
-          <div class="stat"><div class="label">Recibidos</div><div class="value text2" id="ping-recibidos" style="font-size:1rem;">0</div></div>
-          <div class="stat"><div class="label">Enviados</div><div class="value text2" id="ping-enviados" style="font-size:1rem;">0</div></div>
-        </div>
-        <div id="ping-bar-container" style="margin-top:14px;"></div>
-        <div id="ping-error" class="error-msg hidden"></div>
       </div>
     </div>
 

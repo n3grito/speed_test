@@ -66,15 +66,24 @@ canvas.chart {
 }
 #speed-chart { height: 200px; }
 
+.gauge-row {
+  display: flex; justify-content: center; align-items: flex-start;
+  gap: 24px; flex-wrap: wrap;
+}
+.gauge-box {
+  display: flex; flex-direction: column; align-items: center;
+  min-width: 200px;
+}
 .gauge-container {
   display: flex; justify-content: center; align-items: center;
   padding: 8px 0;
 }
-canvas#gauge-canvas {
+canvas[id^="gauge-"] {
   width: 240px; height: 200px;
 }
-@media (max-width: 500px) {
-  canvas#gauge-canvas { width: 180px; height: 150px; }
+@media (max-width: 600px) {
+  .gauge-row { gap: 8px; }
+  canvas[id^="gauge-"] { width: 180px; height: 150px; }
 }
 
 .progress-bar {
@@ -116,15 +125,7 @@ canvas#gauge-canvas {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.ping-bar {
-  display: flex; align-items: center; gap: 8px; margin: 5px 0;
-}
-.ping-bar .bar-fill {
-  height: 22px; border-radius: 4px; transition: width .4s ease;
-  min-width: 4px;
-}
-
-#resultado-ping, #resultado-download, #resultado-upload { margin-top: 14px; }
+#resultado-download, #resultado-upload { margin-top: 14px; }
 
 footer { text-align: center; padding: 20px; color: var(--text3); font-size: .8rem; }
 

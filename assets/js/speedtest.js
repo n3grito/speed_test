@@ -1,6 +1,7 @@
 const SPEEDTEST = {
     state: 'idle',
-    gauge: null,
+    gaugeDl: null,
+    gaugeUl: null,
     chart: null,
     results: { ping: null, download: null, upload: null },
     _ac: null,
@@ -12,13 +13,12 @@ const SPEEDTEST = {
         this._ac = new AbortController();
         this.results = { ping: null, download: null, upload: null };
 
-        show('speedtest-progress');
         hide('speedtest-summary');
         hide('speedtest-error');
-        this._setProgress(0, 'Preparando...');
 
-        if (!this.gauge) {
-            this.gauge = new SpeedGauge('gauge-canvas');
+        if (!this.gaugeDl) {
+            this.gaugeDl = new SpeedGauge('gauge-dl');
+            this.gaugeUl = new SpeedGauge('gauge-ul');
         }
         if (!this.chart) {
             this.chart = new LiveChart('speed-chart', {
@@ -29,8 +29,11 @@ const SPEEDTEST = {
                 ],
             });
         }
-        this.gauge.setPhase('ping');
+        this.gaugeDl.setPhase('ping');
+        this.gaugeUl.setPhase('ping');
         this.chart.clear();
+        this._setDlProgress(0, '');
+        this._setUlProgress(0, '');
         this._setProgress(5, 'Midiendo latencia...');
 
         try {
@@ -58,8 +61,8 @@ const SPEEDTEST = {
     },
 
     async _runPingPhase() {
-        const target = $('#ping-target').value || '8.8.8.8';
-        const count = parseInt($('#ping-count').value) || 10;
+        const target = '8.8.8.8';
+        const count = 10;
         const total = count;
 
         const _acPing = new AbortController();
@@ -79,42 +82,42 @@ const SPEEDTEST = {
         }
 
         this.results.ping = d;
-        this.gauge.label = 'ms';
-        this.gauge.setPhase('ping');
+        this.gaugeDl.label = 'ms';
+        this.gaugeDl.setPhase('ping');
+        this.gaugeUl.label = 'ms';
+        this.gaugeUl.setPhase('ping');
 
         if (d.rtt_promedio) {
-            this.gauge.maxValue = d.rtt_promedio < 30 ? 50 : d.rtt_promedio < 100 ? 150 : 300;
+            const mv = d.rtt_promedio < 30 ? 50 : d.rtt_promedio < 100 ? 150 : 300;
+            this.gaugeDl.maxValue = mv;
+            this.gaugeUl.maxValue = mv;
         }
 
         if (d.rtts && d.rtts.length) {
             for (let i = 0; i < d.rtts.length; i++) {
                 if (this._ac.signal.aborted) return;
                 const v = d.rtts[i];
-                this.gauge.setValue(v);
-                this._setProgress(5 + ((i + 1) / total) * 18,
-                    `Ping ${i + 1}/${total} — ${v.toFixed(1)} ms`);
+                this.gaugeDl.setValue(v);
+                this.gaugeUl.setValue(v);
+                const pct = 5 + ((i + 1) / total) * 18;
+                this._setProgress(pct, `Ping ${i + 1}/${total} — ${v.toFixed(1)} ms`);
                 await this._sleep(30);
             }
-            this.gauge.setValue(d.rtt_promedio);
+            this.gaugeDl.setValue(d.rtt_promedio);
+            this.gaugeUl.setValue(d.rtt_promedio);
         }
 
-        setText('result-ping-min', formatMs(d.rtt_min));
         setText('result-ping-prom', formatMs(d.rtt_promedio));
-        setText('result-ping-max', formatMs(d.rtt_max));
         setText('result-ping-jitter', formatMs(d.rtt_jitter));
         setText('result-ping-perdida', d.porcentaje_perdida + '%',
             d.porcentaje_perdida === 0 ? 'success' : 'danger');
-
-        if (d.resolucion_dns_ms != null) {
-            const el = document.getElementById('result-ping-prom');
-            if (el) el.title = 'Resolución DNS: ' + d.resolucion_dns_ms + ' ms';
-        }
     },
 
     async _runDownloadPhase() {
-        this.gauge.label = 'Mbps ↓';
-        this.gauge.setPhase('download');
-        this.gauge.maxValue = 100;
+        this.gaugeDl.label = 'Mbps ↓';
+        this.gaugeDl.setPhase('download');
+        this.gaugeDl.maxValue = 100;
+        this.gaugeUl.setPhase('idle');
 
         const totalSize = 5 * 1024 * 1024;
         const streams = 4;
@@ -127,6 +130,8 @@ const SPEEDTEST = {
         let lastSampleTime = start;
         let lastSampleBytes = 0;
 
+        this._setDlProgress(5, 'Conectando...');
+
         this._sampleTimer = setInterval(() => {
             const now = performance.now();
             const total = streamBytes.reduce((a, b) => a + b, 0);
@@ -134,7 +139,10 @@ const SPEEDTEST = {
             if (dt >= 0.15) {
                 const instMbps = ((total - lastSampleBytes) * 8) / (dt * 1000000);
                 self.chart.addPoint(0, Math.max(instMbps, 0), (now - start) / 1000);
-                self.gauge.setValue(Math.max(instMbps, 0));
+                self.gaugeDl.setValue(Math.max(instMbps, 0));
+                const pct = 25 + Math.min((total / totalSize) * 30, 30);
+                self._setProgress(pct, `Descargando... ${formatMbps(instMbps)}`);
+                self._setDlProgress((total / totalSize) * 100, `${formatMbps(instMbps)}`);
                 lastSampleBytes = total;
                 lastSampleTime = now;
             }
@@ -170,7 +178,7 @@ const SPEEDTEST = {
 
         if (completed < streams) {
             const rate = completed / streams;
-            self.gauge.setValue(self.gauge.value * rate);
+            self.gaugeDl.setValue(self.gaugeDl.value * rate);
         }
 
         const elapsed = (performance.now() - start) / 1000;
@@ -178,6 +186,7 @@ const SPEEDTEST = {
         const mbps = totalBytes > 0 ? (totalBytes * 8) / (elapsed * 1000000) : 0;
 
         this.results.download = { bytes: totalBytes, tiempo: elapsed, mbps };
+        this._setDlProgress(100, `${formatMbps(mbps)}`);
 
         setText('result-dl-velocidad', formatMbps(mbps),
             mbps > 50 ? 'success' : mbps > 10 ? 'warning' : 'danger');
@@ -186,9 +195,10 @@ const SPEEDTEST = {
     },
 
     async _runUploadPhase() {
-        this.gauge.label = 'Mbps ↑';
-        this.gauge.setPhase('upload');
-        this.gauge.maxValue = Math.max(this.constructor._lastDlSpeed || 100, 20);
+        this.gaugeUl.label = 'Mbps ↑';
+        this.gaugeUl.setPhase('upload');
+        this.gaugeUl.maxValue = Math.max(this.constructor._lastDlSpeed || 100, 20);
+        this.gaugeDl.setPhase('idle');
 
         const totalSize = 3 * 1024 * 1024;
         const start = performance.now();
@@ -196,6 +206,8 @@ const SPEEDTEST = {
         const signal = this._ac.signal;
         let cancelled = false;
         let prevLoaded = 0, prevTime = start;
+
+        this._setUlProgress(5, 'Preparando...');
 
         const payload = new Uint8Array(totalSize);
         for (let i = 0; i < totalSize; i += 65536) {
@@ -220,7 +232,10 @@ const SPEEDTEST = {
                 if (dt >= 0.2) {
                     const instMbps = ((e.loaded - prevLoaded) * 8) / (dt * 1000000);
                     self.chart.addPoint(1, Math.max(instMbps, 0), (now - start) / 1000);
-                    self.gauge.setValue(Math.max(instMbps, 0));
+                    self.gaugeUl.setValue(Math.max(instMbps, 0));
+                    const pct = 60 + Math.min((e.loaded / e.total) * 30, 30);
+                    self._setProgress(pct, `Subiendo... ${formatMbps(instMbps)}`);
+                    self._setUlProgress((e.loaded / e.total) * 100, `${formatMbps(instMbps)}`);
                     prevLoaded = e.loaded;
                     prevTime = now;
                 }
@@ -232,6 +247,7 @@ const SPEEDTEST = {
                 const mbps = totalSize > 0 ? (totalSize * 8) / (elapsed * 1000000) : 0;
                 self.constructor._lastDlSpeed = mbps;
                 self.results.upload = { bytes: totalSize, tiempo: elapsed, mbps };
+                self._setUlProgress(100, `${formatMbps(mbps)}`);
 
                 setText('result-ul-velocidad', formatMbps(mbps),
                     mbps > 30 ? 'success' : mbps > 5 ? 'warning' : 'danger');
@@ -291,9 +307,22 @@ const SPEEDTEST = {
     },
 
     _setProgress(pct, label) {
-        setProgress('speedtest-progress-fill', pct);
-        const el = document.getElementById('speedtest-progress-label');
+        const el = document.getElementById('speedtest-status');
         if (el) el.textContent = label + ' (' + Math.round(pct) + '%)';
+    },
+
+    _setDlProgress(pct, label) {
+        const bar = document.getElementById('progress-dl-fill');
+        if (bar) bar.style.width = Math.min(pct, 100) + '%';
+        const el = document.getElementById('progress-dl-label');
+        if (el) el.textContent = label || 'Descarga';
+    },
+
+    _setUlProgress(pct, label) {
+        const bar = document.getElementById('progress-ul-fill');
+        if (bar) bar.style.width = Math.min(pct, 100) + '%';
+        const el = document.getElementById('progress-ul-label');
+        if (el) el.textContent = label || 'Subida';
     },
 
     _sleep(ms) {

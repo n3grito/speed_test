@@ -67,62 +67,6 @@ async function loadNetworkInfo() {
     }
 }
 
-async function runPing() {
-    if (STATE.testing.ping) return;
-    STATE.testing.ping = true;
-    hide('ping-error');
-
-    show('resultado-ping');
-    show('loading-ping');
-
-    const target = $('#ping-target').value || '8.8.8.8';
-    const count = parseInt($('#ping-count').value) || 10;
-
-    try {
-        const d = await apiFetch(`${API_BASE}/icmp.php?target=${encodeURIComponent(target)}&count=${count}`);
-        renderPingResult(d);
-    } catch (e) {
-        showError('ping-error', 'Error ICMP: ' + e.message);
-    } finally {
-        hide('loading-ping');
-        STATE.testing.ping = false;
-    }
-}
-
-function renderPingResult(d) {
-    hide('ping-error');
-    show('resultado-ping');
-
-    setText('ping-enviados', d.paquetes_enviados, 'text2');
-    setText('ping-recibidos', d.paquetes_recibidos, 'text2');
-    setText('ping-perdida', d.porcentaje_perdida + '%',
-        d.porcentaje_perdida === 0 ? 'success' : d.porcentaje_perdida < 10 ? 'warning' : 'danger');
-    setText('ping-min', formatMs(d.rtt_min), 'success');
-    setText('ping-prom', formatMs(d.rtt_promedio), 'primary');
-    setText('ping-mediana', formatMs(d.rtt_mediana), 'text2');
-    setText('ping-max', formatMs(d.rtt_max), 'warning');
-    setText('ping-jitter', formatMs(d.rtt_jitter), 'accent');
-    setText('ping-desviacion', formatMs(d.rtt_desviacion), 'text2');
-    setText('ping-resolucion', d.resolucion_dns_ms ? d.resolucion_dns_ms + ' ms' : '—', 'text2');
-
-    const barC = document.getElementById('ping-bar-container');
-    barC.innerHTML = '';
-    if (d.rtts && d.rtts.length) {
-        const mx = Math.max(...d.rtts, 1);
-        d.rtts.forEach((rtt, i) => {
-            const pct = (rtt / mx) * 100;
-            const color = rtt < 30 ? 'var(--success)' : rtt < 100 ? 'var(--warning)' : 'var(--danger)';
-            barC.innerHTML += `
-                <div class="ping-bar">
-                    <span style="width:32px;font-size:.75rem;color:var(--text2);">#${i + 1}</span>
-                    <div class="bar-fill" style="width:${pct}%;background:${color};"></div>
-                    <span style="font-size:.8rem;font-weight:600;">${rtt.toFixed(1)}ms</span>
-                </div>`;
-        });
-
-    }
-}
-
 async function runDownload() {
     if (STATE.testing.dl) return;
     STATE.testing.dl = true;
@@ -242,28 +186,24 @@ function cancelTests() {
     if (SPEEDTEST._ac && !SPEEDTEST._ac.signal.aborted) {
         SPEEDTEST._ac.abort();
     }
-    hide('speedtest-progress');
     hide('speedtest-summary');
 }
 
 async function runQuickTest() {
     STATE.testing = { ping: false, dl: false, ul: false };
-    hide('resultado-ping');
     hide('resultado-download');
     hide('resultado-upload');
     $$('.error-msg').forEach(e => e.classList.add('hidden'));
 
-    show('loading-ping');
     show('loading-download');
     show('loading-upload');
 
-    await Promise.allSettled([runPing(), runDownload(), runUpload()]);
+    await Promise.allSettled([runDownload(), runUpload()]);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
     loadNetworkInfo();
 
-    $('#btn-ping').addEventListener('click', runPing);
     $('#btn-download').addEventListener('click', runDownload);
     $('#btn-upload').addEventListener('click', runUpload);
     $('#btn-quick').addEventListener('click', runQuickTest);
