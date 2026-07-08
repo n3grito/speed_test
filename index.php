@@ -104,9 +104,6 @@
           <div class="stat"><div class="label">Enviados</div><div class="value text2" id="ping-enviados" style="font-size:1rem;">0</div></div>
         </div>
         <div id="ping-bar-container" style="margin-top:14px;"></div>
-        <div id="ping-chart-container" class="hidden" style="margin-top:10px;">
-          <canvas id="ping-chart" class="chart"></canvas>
-        </div>
         <div id="ping-error" class="error-msg hidden"></div>
       </div>
     </div>
@@ -131,7 +128,6 @@
               <div class="stat"><div class="label">Datos</div><div class="value pending" id="dl-data">—</div></div>
               <div class="stat"><div class="label">Tiempo</div><div class="value pending" id="dl-tiempo">—</div></div>
             </div>
-            <canvas id="dl-chart" class="chart"></canvas>
             <div id="dl-error" class="error-msg hidden"></div>
           </div>
         </div>
@@ -151,7 +147,6 @@
               <div class="stat"><div class="label">Datos</div><div class="value pending" id="ul-data">—</div></div>
               <div class="stat"><div class="label">Tiempo</div><div class="value pending" id="ul-tiempo">—</div></div>
             </div>
-            <canvas id="ul-chart" class="chart"></canvas>
             <div id="ul-error" class="error-msg hidden"></div>
           </div>
         </div>

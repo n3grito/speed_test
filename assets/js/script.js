@@ -120,20 +120,6 @@ function renderPingResult(d) {
                 </div>`;
         });
 
-        show('ping-chart-container');
-        if (window.pingChart) window.pingChart.clear();
-        d.rtts.forEach((v, i) => {
-            if (!window.pingChart) {
-                window.pingChart = new LiveChart('ping-chart', {
-                    maxPoints: d.rtts.length,
-                    maxValue: Math.max(...d.rtts) * 1.2,
-                    label: 'ms',
-                    color: '#06b6d4',
-                    bgColor: 'rgba(6,182,212,0.12)',
-                });
-            }
-            window.pingChart.addPoint(v, i);
-        });
     }
 }
 
@@ -145,14 +131,6 @@ async function runDownload() {
 
     show('resultado-download');
     show('loading-download');
-
-    if (!window.dlChart) {
-        window.dlChart = new LiveChart('dl-chart', {
-            maxPoints: 80, maxValue: 50, label: 'Mbps',
-            color: '#3b82f6', bgColor: 'rgba(59,130,246,0.12)',
-        });
-    }
-    window.dlChart.clear();
 
     const size = 10 * 1024 * 1024;
     const ac = new AbortController();
@@ -175,8 +153,6 @@ async function runDownload() {
             const now = performance.now();
             const dt = (now - lastSample.time) / 1000;
             if (dt >= 0.15) {
-                const instMbps = ((received - lastSample.bytes) * 8) / (dt * 1000000);
-                window.dlChart.addPoint(instMbps, (now - start) / 1000);
                 lastSample = { time: now, bytes: received };
             }
         }
@@ -204,14 +180,6 @@ function runUpload() {
     show('resultado-upload');
     show('loading-upload');
 
-    if (!window.ulChart) {
-        window.ulChart = new LiveChart('ul-chart', {
-            maxPoints: 80, maxValue: 20, label: 'Mbps',
-            color: '#22c55e', bgColor: 'rgba(34,197,94,0.12)',
-        });
-    }
-    window.ulChart.clear();
-
     const totalSize = 3 * 1024 * 1024;
     const payload = new Uint8Array(totalSize);
     const chunks = Math.ceil(totalSize / 65536);
@@ -227,19 +195,10 @@ function runUpload() {
         STATE.controllers.push(ac);
         const start = performance.now();
         const xhr = new XMLHttpRequest();
-        let prevLoaded = 0, prevTime = start;
 
         xhr.upload.onprogress = (e) => {
             if (!e.lengthComputable) return;
             setProgress('ul-progress', Math.min((e.loaded / e.total) * 100, 100));
-            const now = performance.now();
-            const dt = (now - prevTime) / 1000;
-            if (dt >= 0.15) {
-                const instMbps = ((e.loaded - prevLoaded) * 8) / (dt * 1000000);
-                window.ulChart.addPoint(instMbps, (now - start) / 1000);
-                prevLoaded = e.loaded;
-                prevTime = now;
-            }
         };
 
         function _ulDone() {

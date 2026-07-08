@@ -65,7 +65,6 @@ canvas.chart {
   margin-top: 12px;
 }
 #speed-chart { height: 200px; }
-#dl-chart, #ul-chart { height: 120px; }
 
 .gauge-container {
   display: flex; justify-content: center; align-items: center;

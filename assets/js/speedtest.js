@@ -60,10 +60,23 @@ const SPEEDTEST = {
     async _runPingPhase() {
         const target = $('#ping-target').value || '8.8.8.8';
         const count = parseInt($('#ping-count').value) || 10;
-        const d = await apiFetch(
-            `${API_BASE}/icmp.php?target=${encodeURIComponent(target)}&count=${count}`,
-            { signal: this._ac.signal }
-        );
+        const total = count;
+
+        const _acPing = new AbortController();
+        const _pingTimeout = setTimeout(() => _acPing.abort(), 15000);
+        const _onAbort = () => { clearTimeout(_pingTimeout); _acPing.abort(); };
+        this._ac.signal.addEventListener('abort', _onAbort, { once: true });
+
+        let d;
+        try {
+            d = await apiFetch(
+                `${API_BASE}/icmp.php?target=${encodeURIComponent(target)}&count=${count}`,
+                { signal: _acPing.signal }
+            );
+        } finally {
+            clearTimeout(_pingTimeout);
+            this._ac.signal.removeEventListener('abort', _onAbort);
+        }
 
         this.results.ping = d;
         this.gauge.label = 'ms';
@@ -74,9 +87,12 @@ const SPEEDTEST = {
         }
 
         if (d.rtts && d.rtts.length) {
-            for (const v of d.rtts) {
+            for (let i = 0; i < d.rtts.length; i++) {
                 if (this._ac.signal.aborted) return;
+                const v = d.rtts[i];
                 this.gauge.setValue(v);
+                this._setProgress(5 + ((i + 1) / total) * 18,
+                    `Ping ${i + 1}/${total} — ${v.toFixed(1)} ms`);
                 await this._sleep(30);
             }
             this.gauge.setValue(d.rtt_promedio);
@@ -88,6 +104,11 @@ const SPEEDTEST = {
         setText('result-ping-jitter', formatMs(d.rtt_jitter));
         setText('result-ping-perdida', d.porcentaje_perdida + '%',
             d.porcentaje_perdida === 0 ? 'success' : 'danger');
+
+        if (d.resolucion_dns_ms != null) {
+            const el = document.getElementById('result-ping-prom');
+            if (el) el.title = 'Resolución DNS: ' + d.resolucion_dns_ms + ' ms';
+        }
     },
 
     async _runDownloadPhase() {
