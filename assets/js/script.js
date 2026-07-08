@@ -201,6 +201,62 @@ async function runQuickTest() {
     await Promise.allSettled([runDownload(), runUpload()]);
 }
 
+const PROTOCOL_COLORS = { ping: '#06b6d4', http: '#f59e0b', dns: '#8b5cf6', tcp: '#ec4899' };
+
+function redrawSparkline(protocolId) {
+    const canvas = document.getElementById('spark-' + protocolId);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    const pts = MONITOR.getRttHistory(protocolId, 60);
+    ctx.clearRect(0, 0, w, h);
+
+    if (pts.length < 2) {
+        ctx.fillStyle = '#475569';
+        ctx.font = '10px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Esperando datos...', w / 2, h / 2 + 3);
+        return;
+    }
+
+    const values = pts.map(p => p.rtt);
+    const mx = Math.max(...values, 1);
+    const pad = 2;
+    const plotW = w - pad * 2;
+    const plotH = h - pad * 2;
+    const color = PROTOCOL_COLORS[protocolId] || '#3b82f6';
+
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = 'round';
+
+    for (let i = 0; i < values.length; i++) {
+        const x = pad + (i / (values.length - 1)) * plotW;
+        const y = pad + plotH - (values[i] / mx) * plotH;
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Fill under the line
+    const lastX = pad + ((values.length - 1) / (values.length - 1)) * plotW;
+    ctx.lineTo(lastX, pad + plotH);
+    ctx.lineTo(pad, pad + plotH);
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(0, pad, 0, pad + plotH);
+    grad.addColorStop(0, color + '44');
+    grad.addColorStop(1, 'transparent');
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Show last value
+    ctx.fillStyle = color;
+    ctx.font = 'bold 10px system-ui, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    ctx.fillText(values[values.length - 1].toFixed(0) + 'ms', w - pad, pad);
+}
+
 function initMonitor() {
     const grid = document.getElementById('monitor-grid');
     if (!grid) return;
@@ -218,6 +274,7 @@ function initMonitor() {
             <input type="number" class="pinterval" data-id="${p.id}" value="${cfg.interval}" min="2" max="300"> s
             <input type="text" class="ptarget" data-id="${p.id}" value="${cfg.target}" placeholder="Destino">
           </div>
+          <canvas id="spark-${p.id}" class="sparkline" width="320" height="60"></canvas>
           <div class="pstat" id="pstat-${p.id}">${cfg.enabled ? 'Listo' : 'Inactivo'}</div>`;
         grid.appendChild(card);
     });
@@ -230,6 +287,7 @@ function initMonitor() {
             MONITOR.saveConfig(id, 'enabled', el.checked);
             document.getElementById('pcard-' + id).className = 'protocol-card' + (el.checked ? ' active' : '');
             document.getElementById('pstat-' + id).textContent = el.checked ? 'Listo' : 'Inactivo';
+            redrawSparkline(id);
         }
     });
     grid.addEventListener('input', e => {
@@ -244,11 +302,20 @@ function initMonitor() {
     const stopBtn = document.getElementById('btn-monitor-stop');
     const clearBtn = document.getElementById('btn-monitor-clear');
     const badge = document.getElementById('monitor-badge');
+    const durInput = document.getElementById('mon-duration');
+
+    if (durInput) {
+        durInput.value = MONITOR.duration;
+        durInput.addEventListener('change', () => {
+            MONITOR.duration = parseInt(durInput.value) || 60;
+        });
+    }
 
     function updateMonitorUI() {
         const running = MONITOR.running;
         startBtn.classList.toggle('hidden', running);
         stopBtn.classList.toggle('hidden', !running);
+        if (durInput) durInput.disabled = running;
         badge.textContent = running ? 'Monitoreando' : 'Detenido';
         badge.className = 'badge' + (running ? ' success' : '');
         document.getElementById('monitor-status').classList.toggle('hidden', !running && !MONITOR.history.length);
@@ -275,7 +342,7 @@ function initMonitor() {
 
     let uptimeInterval;
     MONITOR.onEvent((event, data) => {
-        if (event === 'start' || event === 'stop') {
+        if (event === 'start' || event === 'stop' || event === 'auto-stop') {
             updateMonitorUI();
             if (event === 'start') {
                 uptimeInterval = setInterval(updateMonitorStats, 1000);
@@ -283,7 +350,11 @@ function initMonitor() {
             } else {
                 clearInterval(uptimeInterval);
             }
-            if (event === 'stop') updateMonitorStats();
+            if (event === 'stop' || event === 'auto-stop') updateMonitorStats();
+            if (event === 'auto-stop') {
+                const st = document.getElementById('speedtest-status');
+                if (st) st.textContent = 'Monitor finalizado (' + data.duration + 's)';
+            }
         }
         if (event === 'result') {
             const { protocol, entry, stats } = data;
@@ -294,6 +365,7 @@ function initMonitor() {
                     ? `OK ${entry.rtt}ms — ${pct}% uptime`
                     : `Falló — ${pct}% uptime` + (entry.error ? ' (' + entry.error + ')' : '');
             }
+            redrawSparkline(protocol);
             updateMonitorStats();
 
             const log = document.getElementById('monitor-log');
@@ -332,6 +404,7 @@ function initMonitor() {
             MONITOR.protocols.forEach(p => {
                 const st = document.getElementById('pstat-' + p.id);
                 if (st) st.textContent = 'Inactivo';
+                redrawSparkline(p.id);
             });
         }
     });

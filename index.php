@@ -145,6 +145,9 @@
         <button class="btn btn-success" id="btn-monitor-start">Iniciar Monitoreo</button>
         <button class="btn btn-danger hidden" id="btn-monitor-stop">Detener</button>
         <button class="btn btn-outline" id="btn-monitor-clear">Limpiar Historial</button>
+        <label style="display:inline-flex;align-items:center;gap:4px;color:var(--text2);font-size:.85rem;margin-left:8px;">
+          Duraci&oacute;n: <input type="number" id="mon-duration" value="60" min="10" max="3600" style="width:60px;padding:4px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text);"> s
+        </label>
       </div>
       <div id="monitor-status" class="hidden" style="margin-top:14px;">
         <div class="grid-4" style="margin-bottom:12px;">

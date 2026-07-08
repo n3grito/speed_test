@@ -1,8 +1,8 @@
 const MONITOR_PROTOCOLS = [
-    { id: 'ping', label: 'ICMP Ping', desc: 'Verifica conectividad por ICMP', defTarget: '8.8.8.8', defInterval: 5 },
-    { id: 'http',  label: 'HTTP Latencia', desc: 'Mide tiempo de respuesta HTTP', defTarget: 'http://google.com', defInterval: 10 },
-    { id: 'dns',   label: 'Resolución DNS', desc: 'Mide tiempo de resolución de dominio', defTarget: 'google.com', defInterval: 30 },
-    { id: 'tcp',   label: 'TCP Handshake', desc: 'Verifica puerto abierto vía TCP', defTarget: 'google.com:80', defInterval: 15 },
+    { id: 'ping', label: 'ICMP Ping', desc: 'Verifica conectividad por ICMP', defTarget: '8.8.8.8', defInterval: 5, color: '#06b6d4' },
+    { id: 'http',  label: 'HTTP Latencia', desc: 'Mide tiempo de respuesta HTTP', defTarget: 'http://google.com', defInterval: 10, color: '#f59e0b' },
+    { id: 'dns',   label: 'Resolución DNS', desc: 'Mide tiempo de resolución de dominio', defTarget: 'google.com', defInterval: 30, color: '#8b5cf6' },
+    { id: 'tcp',   label: 'TCP Handshake', desc: 'Verifica puerto abierto vía TCP', defTarget: 'google.com:80', defInterval: 15, color: '#ec4899' },
 ];
 
 class MonitorEngine {
@@ -10,10 +10,13 @@ class MonitorEngine {
         this._timers = {};
         this._stats = {};
         this._history = [];
+        this._rttHistory = {};
         this._maxLog = 200;
         this._running = false;
         this._startTime = null;
+        this._stopTimeout = null;
         this._listeners = [];
+        this._duration = parseInt(localStorage.getItem('mon_duration')) || 60;
         this._loadHistory();
         this._loadConfig();
     }
@@ -27,6 +30,12 @@ class MonitorEngine {
             interval: parseInt(localStorage.getItem('mon_interval_' + p.id)) || p.defInterval,
             target: localStorage.getItem('mon_target_' + p.id) || p.defTarget,
         }));
+    }
+
+    get duration() { return this._duration; }
+    set duration(sec) {
+        this._duration = Math.max(10, Math.min(3600, sec));
+        localStorage.setItem('mon_duration', String(this._duration));
     }
 
     _loadConfig() {
@@ -58,6 +67,12 @@ class MonitorEngine {
     get history() { return this._history.slice(-this._maxLog); }
     get stats() { return this._stats; }
 
+    getRttHistory(protocolId, maxPoints = 60) {
+        const h = this._rttHistory[protocolId];
+        if (!h) return [];
+        return h.slice(-maxPoints);
+    }
+
     onEvent(fn) {
         this._listeners.push(fn);
         return () => {
@@ -83,12 +98,23 @@ class MonitorEngine {
             if (cfg && cfg.enabled) this.startProtocol(p.id);
         });
 
-        this._emit('start', { time: this._startTime });
+        this._stopTimeout = setTimeout(() => {
+            if (this._running) {
+                this.stop();
+                this._emit('auto-stop', { duration: this._duration });
+            }
+        }, this._duration * 1000);
+
+        this._emit('start', { time: this._startTime, duration: this._duration });
     }
 
     stop() {
         if (!this._running) return;
         this._running = false;
+        if (this._stopTimeout) {
+            clearTimeout(this._stopTimeout);
+            this._stopTimeout = null;
+        }
         MONITOR_PROTOCOLS.forEach(p => {
             if (this._timers[p.id]) this.stopProtocol(p.id);
         });
@@ -136,6 +162,14 @@ class MonitorEngine {
         this._history.push(entry);
         if (this._history.length > this._maxLog * 2) {
             this._history = this._history.slice(-this._maxLog);
+        }
+
+        if (!this._rttHistory[protocolId]) this._rttHistory[protocolId] = [];
+        if (data.rtt_ms != null) {
+            this._rttHistory[protocolId].push({ ts, rtt: data.rtt_ms });
+            if (this._rttHistory[protocolId].length > 200) {
+                this._rttHistory[protocolId] = this._rttHistory[protocolId].slice(-150);
+            }
         }
 
         if (!this._stats[protocolId]) {
@@ -214,6 +248,7 @@ class MonitorEngine {
     clearHistory() {
         this._history = [];
         this._stats = {};
+        this._rttHistory = {};
         this._outageCount = 0;
         this._wasDown = false;
         this._outageStarted = null;
