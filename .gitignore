@@ -1,0 +1,9 @@
+/cache/*
+!/cache/.gitkeep
+*.log
+.env
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~

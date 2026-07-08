@@ -1,0 +1,302 @@
+const API_BASE = 'api';
+const STATE = {
+    networkInfo: null,
+    testing: { ping: false, dl: false, ul: false },
+    controllers: [],
+};
+
+const $ = (s, c = document) => c.querySelector(s);
+const $$ = (s, c = document) => [...c.querySelectorAll(s)];
+
+function formatBytes(b) {
+    if (!b || b === 0) return '0 B';
+    const u = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.min(Math.floor(Math.log(b) / Math.log(1024)), u.length - 1);
+    return (b / Math.pow(1024, i)).toFixed(1) + ' ' + u[i];
+}
+
+function formatMbps(m) {
+    return (m == null || isNaN(m)) ? '—' : m.toFixed(2) + ' Mbps';
+}
+
+function formatMs(m) {
+    return (m == null || isNaN(m)) ? '—' : m.toFixed(1) + ' ms';
+}
+
+function show(id) { const e = document.getElementById(id); if (e) e.classList.remove('hidden'); }
+function hide(id) { const e = document.getElementById(id); if (e) e.classList.add('hidden'); }
+
+function setText(id, val, cls = '') {
+    const e = document.getElementById(id);
+    if (!e) return;
+    e.textContent = val ?? '—';
+    e.className = 'value' + (cls ? ' ' + cls : '');
+}
+
+function setProgress(id, pct) {
+    const bar = document.getElementById(id);
+    if (bar) bar.style.width = Math.min(pct, 100) + '%';
+}
+
+function showError(id, msg) {
+    const e = document.getElementById(id);
+    if (e) { e.textContent = msg; e.classList.remove('hidden'); }
+}
+
+async function apiFetch(url, opts = {}) {
+    const res = await fetch(url, opts);
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `HTTP ${res.status}`);
+    }
+    const ct = res.headers.get('content-type') || '';
+    if (opts.method === 'POST' || ct.includes('json')) return res.json();
+    return res;
+}
+
+async function loadNetworkInfo() {
+    try {
+        const d = await apiFetch(`${API_BASE}/network-info.php`);
+        STATE.networkInfo = d;
+        setText('ip-publica', d.ip_publica, 'primary');
+        setText('ip-local', d.ip_local, 'text2');
+        setText('proveedor', d.proveedor, 'success');
+        setText('asn', d.asn, 'text2');
+        setText('ubicacion', d.ubicacion, 'text2');
+        setText('hostname', d.hostname || 'N/A', 'text2');
+        setText('pais', d.pais || 'N/A', 'text2');
+    } catch (e) {
+        showError('network-error', 'Error de red: ' + e.message);
+    }
+}
+
+async function runPing() {
+    if (STATE.testing.ping) return;
+    STATE.testing.ping = true;
+    hide('ping-error');
+
+    show('resultado-ping');
+    show('loading-ping');
+
+    const target = $('#ping-target').value || '8.8.8.8';
+    const count = parseInt($('#ping-count').value) || 10;
+
+    try {
+        const d = await apiFetch(`${API_BASE}/icmp.php?target=${encodeURIComponent(target)}&count=${count}`);
+        renderPingResult(d);
+    } catch (e) {
+        showError('ping-error', 'Error ICMP: ' + e.message);
+    } finally {
+        hide('loading-ping');
+        STATE.testing.ping = false;
+    }
+}
+
+function renderPingResult(d) {
+    hide('ping-error');
+    show('resultado-ping');
+
+    setText('ping-enviados', d.paquetes_enviados, 'text2');
+    setText('ping-recibidos', d.paquetes_recibidos, 'text2');
+    setText('ping-perdida', d.porcentaje_perdida + '%',
+        d.porcentaje_perdida === 0 ? 'success' : d.porcentaje_perdida < 10 ? 'warning' : 'danger');
+    setText('ping-min', formatMs(d.rtt_min), 'success');
+    setText('ping-prom', formatMs(d.rtt_promedio), 'primary');
+    setText('ping-mediana', formatMs(d.rtt_mediana), 'text2');
+    setText('ping-max', formatMs(d.rtt_max), 'warning');
+    setText('ping-jitter', formatMs(d.rtt_jitter), 'accent');
+    setText('ping-desviacion', formatMs(d.rtt_desviacion), 'text2');
+    setText('ping-resolucion', d.resolucion_dns_ms ? d.resolucion_dns_ms + ' ms' : '—', 'text2');
+
+    const barC = document.getElementById('ping-bar-container');
+    barC.innerHTML = '';
+    if (d.rtts && d.rtts.length) {
+        const mx = Math.max(...d.rtts, 1);
+        d.rtts.forEach((rtt, i) => {
+            const pct = (rtt / mx) * 100;
+            const color = rtt < 30 ? 'var(--success)' : rtt < 100 ? 'var(--warning)' : 'var(--danger)';
+            barC.innerHTML += `
+                <div class="ping-bar">
+                    <span style="width:32px;font-size:.75rem;color:var(--text2);">#${i + 1}</span>
+                    <div class="bar-fill" style="width:${pct}%;background:${color};"></div>
+                    <span style="font-size:.8rem;font-weight:600;">${rtt.toFixed(1)}ms</span>
+                </div>`;
+        });
+
+        show('ping-chart-container');
+        if (window.pingChart) window.pingChart.clear();
+        d.rtts.forEach((v, i) => {
+            if (!window.pingChart) {
+                window.pingChart = new LiveChart('ping-chart', {
+                    maxPoints: d.rtts.length,
+                    maxValue: Math.max(...d.rtts) * 1.2,
+                    label: 'ms',
+                    color: '#06b6d4',
+                    bgColor: 'rgba(6,182,212,0.12)',
+                });
+            }
+            window.pingChart.addPoint(v, i);
+        });
+    }
+}
+
+async function runDownload() {
+    if (STATE.testing.dl) return;
+    STATE.testing.dl = true;
+    hide('dl-error');
+    setProgress('dl-progress', 0);
+
+    show('resultado-download');
+    show('loading-download');
+
+    if (!window.dlChart) {
+        window.dlChart = new LiveChart('dl-chart', {
+            maxPoints: 80, maxValue: 50, label: 'Mbps',
+            color: '#3b82f6', bgColor: 'rgba(59,130,246,0.12)',
+        });
+    }
+    window.dlChart.clear();
+
+    const size = 10 * 1024 * 1024;
+    const ac = new AbortController();
+    STATE.controllers.push(ac);
+
+    const start = performance.now();
+    let received = 0;
+    let lastSample = { time: start, bytes: 0 };
+
+    try {
+        const resp = await fetch(`${API_BASE}/download.php?size=${size}&id=0`, { signal: ac.signal });
+        const reader = resp.body.getReader();
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            received += value.length;
+            setProgress('dl-progress', Math.min((received / size) * 100, 100));
+
+            const now = performance.now();
+            const dt = (now - lastSample.time) / 1000;
+            if (dt >= 0.15) {
+                const instMbps = ((received - lastSample.bytes) * 8) / (dt * 1000000);
+                window.dlChart.addPoint(instMbps, (now - start) / 1000);
+                lastSample = { time: now, bytes: received };
+            }
+        }
+
+        const elapsed = (performance.now() - start) / 1000;
+        const mbps = (received * 8) / (elapsed * 1000000);
+        renderBandwidthResult('dl', received, elapsed, mbps);
+    } catch (e) {
+        if (e.name !== 'AbortError')
+            showError('dl-error', 'Error descarga: ' + e.message);
+    } finally {
+        hide('loading-download');
+        STATE.testing.dl = false;
+    }
+}
+
+function runUpload() {
+    if (STATE.testing.ul) return Promise.resolve();
+    STATE.testing.ul = true;
+    hide('ul-error');
+    setProgress('ul-progress', 0);
+
+    show('resultado-upload');
+    show('loading-upload');
+
+    if (!window.ulChart) {
+        window.ulChart = new LiveChart('ul-chart', {
+            maxPoints: 80, maxValue: 20, label: 'Mbps',
+            color: '#22c55e', bgColor: 'rgba(34,197,94,0.12)',
+        });
+    }
+    window.ulChart.clear();
+
+    const totalSize = 3 * 1024 * 1024;
+    const payload = new Uint8Array(totalSize);
+    const chunks = Math.ceil(totalSize / 65536);
+    for (let i = 0; i < chunks; i++) {
+        const len = Math.min(65536, totalSize - i * 65536);
+        const tmp = new Uint8Array(len);
+        crypto.getRandomValues(tmp);
+        payload.set(tmp, i * 65536);
+    }
+
+    return new Promise((resolve) => {
+        const ac = new AbortController();
+        STATE.controllers.push(ac);
+        const start = performance.now();
+        const xhr = new XMLHttpRequest();
+        let prevLoaded = 0, prevTime = start;
+
+        xhr.upload.onprogress = (e) => {
+            if (!e.lengthComputable) return;
+            setProgress('ul-progress', Math.min((e.loaded / e.total) * 100, 100));
+            const now = performance.now();
+            const dt = (now - prevTime) / 1000;
+            if (dt >= 0.15) {
+                const instMbps = ((e.loaded - prevLoaded) * 8) / (dt * 1000000);
+                window.ulChart.addPoint(instMbps, (now - start) / 1000);
+                prevLoaded = e.loaded;
+                prevTime = now;
+            }
+        };
+
+        xhr.onload = () => {
+            const elapsed = (performance.now() - start) / 1000;
+            const mbps = (totalSize * 8) / (elapsed * 1000000);
+            STATE.testing.ul = false;
+            hide('loading-upload');
+            renderBandwidthResult('ul', totalSize, elapsed, mbps);
+            resolve();
+        };
+        xhr.onerror = () => { STATE.testing.ul = false; hide('loading-upload'); showError('ul-error', 'Error subida'); resolve(); };
+        xhr.onabort = () => { STATE.testing.ul = false; hide('loading-upload'); resolve(); };
+        ac.signal.addEventListener('abort', () => xhr.abort());
+
+        xhr.open('POST', `${API_BASE}/upload.php`);
+        xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+        xhr.send(payload);
+    });
+}
+
+function renderBandwidthResult(prefix, bytes, elapsed, mbps) {
+    hide(prefix + '-error');
+    show('resultado-' + prefix);
+    setText(prefix + '-velocidad', formatMbps(mbps),
+        mbps > 50 ? 'success' : mbps > 10 ? 'warning' : 'danger');
+    setText(prefix + '-data', formatBytes(bytes), 'text2');
+    setText(prefix + '-tiempo', elapsed.toFixed(2) + ' s', 'text2');
+}
+
+function cancelTests() {
+    STATE.controllers.forEach(ac => ac.abort());
+    STATE.controllers = [];
+    if (SPEEDTEST.state === 'running') SPEEDTEST.state = 'idle';
+}
+
+async function runQuickTest() {
+    if (STATE.testing.ping || STATE.testing.dl || STATE.testing.ul) return;
+    hide('resultado-ping');
+    hide('resultado-download');
+    hide('resultado-upload');
+    $$('.error-msg').forEach(e => e.classList.add('hidden'));
+
+    show('loading-ping');
+    show('loading-download');
+    show('loading-upload');
+
+    await Promise.allSettled([runPing(), runDownload(), runUpload()]);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadNetworkInfo();
+
+    $('#btn-ping').addEventListener('click', runPing);
+    $('#btn-download').addEventListener('click', runDownload);
+    $('#btn-upload').addEventListener('click', runUpload);
+    $('#btn-quick').addEventListener('click', runQuickTest);
+    $('#btn-cancel').addEventListener('click', cancelTests);
+    $('#btn-speedtest').addEventListener('click', () => SPEEDTEST.start());
+});
