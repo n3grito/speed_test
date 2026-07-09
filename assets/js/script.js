@@ -59,7 +59,6 @@ async function loadNetworkInfo() {
         const d = await apiFetch(`${API_BASE}/network-info.php`);
         STATE.networkInfo = d;
         setText('ip-router', d.ip_router || 'N/A', 'primary');
-        setText('ip-local', d.ip_local, 'text2');
         setText('proveedor', d.proveedor || 'N/A', 'success');
         setText('ubicacion', d.ubicacion || 'N/A', 'text2');
     } catch (e) {

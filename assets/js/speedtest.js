@@ -65,59 +65,92 @@ const SPEEDTEST = {
         const count = 10;
         const total = count;
 
+        this.gaugeDl.label = 'ms';
+        this.gaugeUl.label = 'ms';
+        this.gaugeDl.setPhase('ping');
+        this.gaugeUl.setPhase('ping');
+
         const _acPing = new AbortController();
         const _pingTimeout = setTimeout(() => _acPing.abort(), 15000);
         const _onAbort = () => { clearTimeout(_pingTimeout); _acPing.abort(); };
         this._ac.signal.addEventListener('abort', _onAbort, { once: true });
 
-        let d;
+        let reader;
         try {
-            d = await apiFetch(
-                `${API_BASE}/icmp.php?target=${encodeURIComponent(target)}&count=${count}`,
+            const resp = await fetch(
+                `${API_BASE}/icmp.php?target=${encodeURIComponent(target)}&count=${count}&stream=1&_=${Date.now()}`,
                 { signal: _acPing.signal }
             );
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+            reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let seq = 0;
+            let summary = null;
+
+            while (true) {
+                if (this._ac.signal.aborted) {
+                    reader.cancel().catch(() => {});
+                    return;
+                }
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    try {
+                        const data = JSON.parse(line);
+                        if (data.type === 'ping') {
+                            seq = data.seq || seq + 1;
+                            const rtt = data.rtt;
+                            if (rtt != null) {
+                                this.gaugeDl.setValue(rtt);
+                                this.gaugeUl.setValue(rtt);
+                            }
+                            const pct = 5 + (seq / total) * 18;
+                            this._setProgress(pct, `Ping ${seq}/${total} — ${rtt != null ? rtt.toFixed(1) + ' ms' : 'timeout'}`);
+                        } else if (data.type === 'summary') {
+                            summary = data;
+                        }
+                    } catch (_) {}
+                }
+            }
+
+            if (!summary) throw new Error('No se recibió resumen de ping');
+
+            this.results.ping = summary;
+
+            if (summary.rtt_promedio) {
+                const mv = summary.rtt_promedio < 30 ? 50 : summary.rtt_promedio < 100 ? 150 : 300;
+                this.gaugeDl.maxValue = mv;
+                this.gaugeUl.maxValue = mv;
+                this.gaugeDl.setValue(summary.rtt_promedio);
+                this.gaugeUl.setValue(summary.rtt_promedio);
+            }
+
+            setText('result-ping-prom', formatMs(summary.rtt_promedio));
+            setText('result-ping-jitter', formatMs(summary.rtt_jitter));
+            setText('result-ping-perdida', summary.porcentaje_perdida + '%',
+                summary.porcentaje_perdida === 0 ? 'success' : 'danger');
         } finally {
             clearTimeout(_pingTimeout);
             this._ac.signal.removeEventListener('abort', _onAbort);
+            if (reader) reader.cancel().catch(() => {});
         }
-
-        this.results.ping = d;
-        this.gaugeDl.label = 'ms';
-        this.gaugeDl.setPhase('ping');
-        this.gaugeUl.label = 'ms';
-        this.gaugeUl.setPhase('ping');
-
-        if (d.rtt_promedio) {
-            const mv = d.rtt_promedio < 30 ? 50 : d.rtt_promedio < 100 ? 150 : 300;
-            this.gaugeDl.maxValue = mv;
-            this.gaugeUl.maxValue = mv;
-        }
-
-        if (d.rtts && d.rtts.length) {
-            for (let i = 0; i < d.rtts.length; i++) {
-                if (this._ac.signal.aborted) return;
-                const v = d.rtts[i];
-                this.gaugeDl.setValue(v);
-                this.gaugeUl.setValue(v);
-                const pct = 5 + ((i + 1) / total) * 18;
-                this._setProgress(pct, `Ping ${i + 1}/${total} — ${v.toFixed(1)} ms`);
-                await this._sleep(30);
-            }
-            this.gaugeDl.setValue(d.rtt_promedio);
-            this.gaugeUl.setValue(d.rtt_promedio);
-        }
-
-        setText('result-ping-prom', formatMs(d.rtt_promedio));
-        setText('result-ping-jitter', formatMs(d.rtt_jitter));
-        setText('result-ping-perdida', d.porcentaje_perdida + '%',
-            d.porcentaje_perdida === 0 ? 'success' : 'danger');
     },
 
     async _runDownloadPhase() {
         this.gaugeDl.label = 'Mbps ↓';
+        this.gaugeUl.label = 'Mbps ↓';
         this.gaugeDl.setPhase('download');
+        this.gaugeUl.setPhase('download');
         this.gaugeDl.maxValue = 100;
-        this.gaugeUl.setPhase('idle');
+        this.gaugeUl.maxValue = 100;
 
         const totalSize = 5 * 1024 * 1024;
         const streams = 4;
@@ -140,6 +173,7 @@ const SPEEDTEST = {
                 const instMbps = ((total - lastSampleBytes) * 8) / (dt * 1000000);
                 self.chart.addPoint(0, Math.max(instMbps, 0), (now - start) / 1000);
                 self.gaugeDl.setValue(Math.max(instMbps, 0));
+                self.gaugeUl.setValue(Math.max(instMbps, 0));
                 const pct = 25 + Math.min((total / totalSize) * 30, 30);
                 self._setProgress(pct, `Descargando... ${formatMbps(instMbps)}`);
                 self._setDlProgress((total / totalSize) * 100, `${formatMbps(instMbps)}`);
@@ -196,9 +230,11 @@ const SPEEDTEST = {
 
     async _runUploadPhase() {
         this.gaugeUl.label = 'Mbps ↑';
+        this.gaugeDl.label = 'Mbps ↑';
         this.gaugeUl.setPhase('upload');
+        this.gaugeDl.setPhase('upload');
         this.gaugeUl.maxValue = Math.max(this.constructor._lastDlSpeed || 100, 20);
-        this.gaugeDl.setPhase('idle');
+        this.gaugeDl.maxValue = Math.max(this.constructor._lastDlSpeed || 100, 20);
 
         const totalSize = 3 * 1024 * 1024;
         const start = performance.now();
@@ -233,6 +269,7 @@ const SPEEDTEST = {
                     const instMbps = ((e.loaded - prevLoaded) * 8) / (dt * 1000000);
                     self.chart.addPoint(1, Math.max(instMbps, 0), (now - start) / 1000);
                     self.gaugeUl.setValue(Math.max(instMbps, 0));
+                    self.gaugeDl.setValue(Math.max(instMbps, 0));
                     const pct = 60 + Math.min((e.loaded / e.total) * 30, 30);
                     self._setProgress(pct, `Subiendo... ${formatMbps(instMbps)}`);
                     self._setUlProgress((e.loaded / e.total) * 100, `${formatMbps(instMbps)}`);
