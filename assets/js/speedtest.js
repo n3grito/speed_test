@@ -160,11 +160,9 @@ const SPEEDTEST = {
 
     async _runDownloadPhase() {
         this.gaugeDl.label = 'Mbps ↓';
-        this.gaugeUl.label = 'Mbps ↓';
         this.gaugeDl.setPhase('download');
-        this.gaugeUl.setPhase('download');
         this.gaugeDl.maxValue = 100;
-        this.gaugeUl.maxValue = 100;
+        this.gaugeUl.setPhase('idle');
 
         const totalSize = 5 * 1024 * 1024;
         const streams = 4;
@@ -187,7 +185,6 @@ const SPEEDTEST = {
                 const instMbps = ((total - lastSampleBytes) * 8) / (dt * 1000000);
                 self.chart.addPoint(0, Math.max(instMbps, 0), (now - start) / 1000);
                 self.gaugeDl.setValue(Math.max(instMbps, 0));
-                self.gaugeUl.setValue(Math.max(instMbps, 0));
                 const pct = 25 + Math.min((total / totalSize) * 30, 30);
                 self._setProgress(pct, `Descargando... ${formatMbps(instMbps)}`);
                 self._setDlProgress((total / totalSize) * 100, `${formatMbps(instMbps)}`);
@@ -243,12 +240,18 @@ const SPEEDTEST = {
     },
 
     async _runUploadPhase() {
+        const dlResult = this.results.download;
         this.gaugeUl.label = 'Mbps ↑';
-        this.gaugeDl.label = 'Mbps ↑';
         this.gaugeUl.setPhase('upload');
-        this.gaugeDl.setPhase('upload');
         this.gaugeUl.maxValue = Math.max(this.constructor._lastDlSpeed || 100, 20);
-        this.gaugeDl.maxValue = Math.max(this.constructor._lastDlSpeed || 100, 20);
+        if (dlResult && dlResult.mbps) {
+            this.gaugeDl.label = 'Mbps ↓';
+            this.gaugeDl.setPhase('download');
+            this.gaugeDl.maxValue = Math.max(dlResult.mbps * 1.3, 50);
+            this.gaugeDl.setValue(dlResult.mbps);
+        } else {
+            this.gaugeDl.setPhase('idle');
+        }
 
         const totalSize = 3 * 1024 * 1024;
         const start = performance.now();
@@ -283,7 +286,6 @@ const SPEEDTEST = {
                     const instMbps = ((e.loaded - prevLoaded) * 8) / (dt * 1000000);
                     self.chart.addPoint(1, Math.max(instMbps, 0), (now - start) / 1000);
                     self.gaugeUl.setValue(Math.max(instMbps, 0));
-                    self.gaugeDl.setValue(Math.max(instMbps, 0));
                     const pct = 60 + Math.min((e.loaded / e.total) * 30, 30);
                     self._setProgress(pct, `Subiendo... ${formatMbps(instMbps)}`);
                     self._setUlProgress((e.loaded / e.total) * 100, `${formatMbps(instMbps)}`);
