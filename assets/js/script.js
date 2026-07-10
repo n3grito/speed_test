@@ -58,7 +58,7 @@ async function loadNetworkInfo() {
     try {
         const d = await apiFetch(`${API_BASE}/network-info.php`);
         STATE.networkInfo = d;
-        setText('ip-router', d.ip_router || 'N/A', 'primary');
+        setText('ip-router', d.ip_publica || 'N/A', 'primary');
         setText('proveedor', d.proveedor || 'N/A', 'success');
         setText('ubicacion', d.ubicacion || 'N/A', 'text2');
     } catch (e) {
@@ -186,6 +186,8 @@ function cancelTests() {
         SPEEDTEST._ac.abort();
     }
     hide('speedtest-summary');
+    hide('btn-stop-test');
+    show('btn-speedtest');
 }
 
 async function runQuickTest() {
@@ -429,4 +431,5 @@ document.addEventListener('DOMContentLoaded', () => {
     $('#btn-quick').addEventListener('click', runQuickTest);
     $('#btn-cancel').addEventListener('click', cancelTests);
     $('#btn-speedtest').addEventListener('click', () => SPEEDTEST.start());
+    $('#btn-stop-test').addEventListener('click', cancelTests);
 });

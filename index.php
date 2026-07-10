@@ -17,7 +17,7 @@
     <div class="card">
       <h2>Informaci&oacute;n de Red</h2>
       <div class="grid-3">
-        <div class="stat"><div class="label">Router</div><div class="value pending" id="ip-router">Cargando...</div></div>
+        <div class="stat"><div class="label">IP P&uacute;blica</div><div class="value pending" id="ip-router">Cargando...</div></div>
         <div class="stat"><div class="label">Proveedor (ISP)</div><div class="value pending" id="proveedor">Cargando...</div></div>
         <div class="stat"><div class="label">Ubicaci&oacute;n</div><div class="value pending" id="ubicacion">Cargando...</div></div>
       </div>
@@ -49,6 +49,7 @@
         </div>
         <div style="margin-top: 10px;">
           <button class="btn btn-success btn-lg" id="btn-speedtest">Iniciar Test Completo</button>
+          <button class="btn btn-danger btn-lg hidden" id="btn-stop-test">Detener</button>
         </div>
         <p id="speedtest-status" style="color:var(--text3);font-size:.8rem;margin-top:8px;min-height:1.2em;"></p>
         <div id="speedtest-error" class="error-msg hidden" style="margin-top:12px;"></div>

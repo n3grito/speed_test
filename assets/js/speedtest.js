@@ -15,6 +15,8 @@ const SPEEDTEST = {
 
         hide('speedtest-summary');
         hide('speedtest-error');
+        hide('btn-speedtest');
+        show('btn-stop-test');
 
         if (!this.gaugeDl) {
             this.gaugeDl = new SpeedGauge('gauge-dl');
@@ -49,6 +51,7 @@ const SPEEDTEST = {
             await this._runUploadPhase();
 
             this._setProgress(95, 'Generando reporte...');
+            this._freezeResults();
             this._showSummary();
             this._setProgress(100, 'Completado');
         } catch (e) {
@@ -57,13 +60,14 @@ const SPEEDTEST = {
         } finally {
             this.state = 'idle';
             this._ac = null;
+            hide('btn-stop-test');
+            show('btn-speedtest');
         }
     },
 
     async _runPingPhase() {
-        const target = '8.8.8.8';
         const count = 10;
-        const total = count;
+        const rtts = [];
 
         this.gaugeDl.label = 'ms';
         this.gaugeUl.label = 'ms';
@@ -75,73 +79,83 @@ const SPEEDTEST = {
         const _onAbort = () => { clearTimeout(_pingTimeout); _acPing.abort(); };
         this._ac.signal.addEventListener('abort', _onAbort, { once: true });
 
-        let reader;
+        const signal = _acPing.signal;
+
         try {
-            const resp = await fetch(
-                `${API_BASE}/icmp.php?target=${encodeURIComponent(target)}&count=${count}&stream=1&_=${Date.now()}`,
-                { signal: _acPing.signal }
-            );
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            for (let i = 1; i <= count; i++) {
+                if (signal.aborted) return;
 
-            reader = resp.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-            let seq = 0;
-            let summary = null;
+                const _pc = new AbortController();
+                const _pt = setTimeout(() => _pc.abort(), 3000);
+                const onParentAbort = () => { clearTimeout(_pt); _pc.abort(); };
+                signal.addEventListener('abort', onParentAbort, { once: true });
 
-            while (true) {
-                if (this._ac.signal.aborted) {
-                    reader.cancel().catch(() => {});
-                    return;
+                const start = performance.now();
+                let rtt = null;
+                try {
+                    await fetch(`${API_BASE}/latency.php?_=${Date.now()}${Math.random()}`, {
+                        cache: 'no-store',
+                        signal: _pc.signal,
+                    });
+                    rtt = performance.now() - start;
+                    rtts.push(rtt);
+                } catch (_) {
+                    // packet loss or timeout
+                } finally {
+                    clearTimeout(_pt);
+                    signal.removeEventListener('abort', onParentAbort);
                 }
-                const { done, value } = await reader.read();
-                if (done) break;
 
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-
-                for (const line of lines) {
-                    if (!line.trim()) continue;
-                    try {
-                        const data = JSON.parse(line);
-                        if (data.type === 'ping') {
-                            seq = data.seq || seq + 1;
-                            const rtt = data.rtt;
-                            if (rtt != null) {
-                                this.gaugeDl.setValue(rtt);
-                                this.gaugeUl.setValue(rtt);
-                            }
-                            const pct = 5 + (seq / total) * 18;
-                            this._setProgress(pct, `Ping ${seq}/${total} — ${rtt != null ? rtt.toFixed(1) + ' ms' : 'timeout'}`);
-                        } else if (data.type === 'summary') {
-                            summary = data;
-                        }
-                    } catch (_) {}
+                if (rtt != null) {
+                    this.gaugeDl.setValue(rtt);
+                    this.gaugeUl.setValue(rtt);
                 }
+                const pct = 5 + (i / count) * 18;
+                this._setProgress(pct, `Ping ${i}/${count} — ${rtt != null ? rtt.toFixed(1) + ' ms' : 'timeout'}`);
+                await this._sleep(30);
             }
-
-            if (!summary) throw new Error('No se recibió resumen de ping');
-
-            this.results.ping = summary;
-
-            if (summary.rtt_promedio) {
-                const mv = summary.rtt_promedio < 30 ? 50 : summary.rtt_promedio < 100 ? 150 : 300;
-                this.gaugeDl.maxValue = mv;
-                this.gaugeUl.maxValue = mv;
-                this.gaugeDl.setValue(summary.rtt_promedio);
-                this.gaugeUl.setValue(summary.rtt_promedio);
-            }
-
-            setText('result-ping-prom', formatMs(summary.rtt_promedio));
-            setText('result-ping-jitter', formatMs(summary.rtt_jitter));
-            setText('result-ping-perdida', summary.porcentaje_perdida + '%',
-                summary.porcentaje_perdida === 0 ? 'success' : 'danger');
         } finally {
             clearTimeout(_pingTimeout);
             this._ac.signal.removeEventListener('abort', _onAbort);
-            if (reader) reader.cancel().catch(() => {});
         }
+
+        const received = rtts.length;
+        const lost = count - received;
+        const pctLost = count > 0 ? (lost / count) * 100 : 0;
+
+        let prom, jitter, min, max;
+        if (received > 0) {
+            const sorted = [...rtts].sort((a, b) => a - b);
+            min = sorted[0];
+            max = sorted[received - 1];
+            prom = rtts.reduce((a, b) => a + b, 0) / received;
+            const q1 = sorted[Math.floor(received * 0.25)];
+            const q3 = sorted[Math.floor(received * 0.75)];
+            jitter = (q3 - q1) / 2;
+
+            const mv = prom < 30 ? 50 : prom < 100 ? 150 : 300;
+            this.gaugeDl.maxValue = mv;
+            this.gaugeUl.maxValue = mv;
+            this.gaugeDl.setValue(prom);
+            this.gaugeUl.setValue(prom);
+        }
+
+        this.results.ping = {
+            rtt_promedio: prom ?? null,
+            rtt_jitter: jitter ?? null,
+            rtt_min: min ?? null,
+            rtt_max: max ?? null,
+            rtts,
+            paquetes_enviados: count,
+            paquetes_recibidos: received,
+            paquetes_perdidos: lost,
+            porcentaje_perdida: pctLost,
+        };
+
+        setText('result-ping-prom', formatMs(prom));
+        setText('result-ping-jitter', formatMs(jitter));
+        setText('result-ping-perdida', pctLost.toFixed(1) + '%',
+            pctLost === 0 ? 'success' : 'danger');
     },
 
     async _runDownloadPhase() {
@@ -303,6 +317,25 @@ const SPEEDTEST = {
             xhr.setRequestHeader('Content-Type', 'application/octet-stream');
             xhr.send(payload);
         });
+    },
+
+    _freezeResults() {
+        const d = this.results.download;
+        const u = this.results.upload;
+        if (d && d.mbps) {
+            this.gaugeDl.label = 'Mbps ↓';
+            this.gaugeDl.setPhase('download');
+            this.gaugeDl.maxValue = Math.max(d.mbps * 1.3, 50);
+            this.gaugeDl.setValue(d.mbps);
+            this._setDlProgress(100, formatMbps(d.mbps));
+        }
+        if (u && u.mbps) {
+            this.gaugeUl.label = 'Mbps ↑';
+            this.gaugeUl.setPhase('upload');
+            this.gaugeUl.maxValue = Math.max(u.mbps * 1.3, 50);
+            this.gaugeUl.setValue(u.mbps);
+            this._setUlProgress(100, formatMbps(u.mbps));
+        }
     },
 
     _showSummary() {
